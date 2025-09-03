@@ -76,36 +76,50 @@ class CompositePipeline:
         # Select feature columns and fill nulls with NaN for numeric handling
         features_df = df.select(columns).fill_null(float('nan'))
         features_array = features_df.to_numpy()
-        
+
         # Get group identifiers
         group_values = df[self.group_identifier].to_numpy()
-        
-        # Encode string group identifiers as numeric values
-        unique_groups = np.unique(group_values)
-        
-        # Create or update group mapping
-        if not self._group_mapping:
-            # First time: create mapping
-            self._group_mapping = {i: group for i, group in enumerate(unique_groups)}
-        else:
-            # Subsequent calls: ensure all groups are in mapping
-            existing_groups = set(self._group_mapping.values())
-            new_groups = set(unique_groups) - existing_groups
-            if new_groups:
-                next_idx = max(self._group_mapping.keys()) + 1 if self._group_mapping else 0
-                for group in new_groups:
-                    self._group_mapping[next_idx] = group
-                    next_idx += 1
-        
-        # Create reverse mapping for encoding
-        group_to_idx = {v: k for k, v in self._group_mapping.items()}
-        
-        # Encode groups as numeric values
-        numeric_groups = np.array([float(group_to_idx[g]) for g in group_values]).reshape(-1, 1)
-        
+
+        # Check if group identifiers are already numeric
+        try:
+            # Try to convert to numeric - if successful, use original values
+            numeric_groups = group_values.astype(float).reshape(-1, 1)
+            # Update mapping to preserve numeric values
+            unique_groups = np.unique(group_values)
+            if not self._group_mapping:
+                self._group_mapping = {float(group): group for group in unique_groups}
+            else:
+                # Add new groups if they don't exist
+                for group in unique_groups:
+                    if group not in self._group_mapping.values():
+                        self._group_mapping[float(group)] = group
+        except (ValueError, TypeError):
+            # Group identifiers are not numeric - use mapping approach
+            unique_groups = np.unique(group_values)
+
+            # Create or update group mapping
+            if not self._group_mapping:
+                # First time: create mapping
+                self._group_mapping = dict(enumerate(unique_groups))
+            else:
+                # Subsequent calls: ensure all groups are in mapping
+                existing_groups = set(self._group_mapping.values())
+                new_groups = set(unique_groups) - existing_groups
+                if new_groups:
+                    next_idx = max(self._group_mapping.keys()) + 1 if self._group_mapping else 0
+                    for group in new_groups:
+                        self._group_mapping[next_idx] = group
+                        next_idx += 1
+
+            # Create reverse mapping for encoding
+            group_to_idx = {v: k for k, v in self._group_mapping.items()}
+
+            # Encode groups as numeric values
+            numeric_groups = np.array([float(group_to_idx[g]) for g in group_values]).reshape(-1, 1)
+
         # Combine features with numeric group identifiers
         array_data = np.hstack([features_array, numeric_groups])
-        
+
         return array_data
 
     def _numpy_to_dataframe_update(

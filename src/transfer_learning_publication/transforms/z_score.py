@@ -5,8 +5,8 @@ from .base import BaseTransform
 
 class ZScore(BaseTransform):
     def _fit(self, X: np.ndarray) -> dict:
-        # Use NaN-aware functions to handle missing values
-        return {"mean": np.nanmean(X, axis=0), "std": np.nanstd(X, axis=0)}
+        # Use regular mean/std so NaN values propagate to results
+        return {"mean": np.mean(X, axis=0), "std": np.std(X, axis=0)}
 
     def _transform(self, X: np.ndarray) -> np.ndarray:
         mean = self._fitted_state["mean"]
