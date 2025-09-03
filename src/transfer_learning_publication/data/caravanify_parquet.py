@@ -1,321 +1,341 @@
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
 from pathlib import Path
 
 import geopandas as gpd
 import pandas as pd
+import polars as pl
 
 
-@dataclass
-class CaravanifyParquetConfig:
+class CaravanDataSource:
     """
-    Configuration for loading Caravan-formatted datasets.
+    Lazy data access for Caravan datasets using Polars and hive partitioning.
 
-    Attributes:
-        attributes_dir: Directory containing attribute parquet files.
-        timeseries_dir: Directory containing timeseries parquet files.
-        gauge_id_prefix: Prefix used to identify gauge IDs.
-        shapefile_dir: Optional directory containing shapefile data.
-        use_caravan_attributes: Flag to load Caravan attributes.
-        use_hydroatlas_attributes: Flag to load HydroAtlas attributes.
-        use_other_attributes: Flag to load other attributes.
-        human_influence_path: Path to human influence classification parquet (with gauge_id and human_influence_category columns)
+    The data is organized in a hive-partitioned structure that enables efficient
+    filtering at the file level without reading data.
     """
 
-    attributes_dir: str | Path
-    timeseries_dir: str | Path
-    gauge_id_prefix: str
-    shapefile_dir: str | Path | None = None
-
-    human_influence_path: str | Path | None = None
-
-    use_caravan_attributes: bool = True
-    use_hydroatlas_attributes: bool = False
-    use_other_attributes: bool = False
-
-    def __post_init__(self):
+    def __init__(self, base_path: str | Path, region: str | None = None):
         """
-        Convert directory paths provided as strings to Path objects.
-        """
-        self.attributes_dir = Path(self.attributes_dir)
-        self.timeseries_dir = Path(self.timeseries_dir)
-        if self.shapefile_dir:
-            self.shapefile_dir = Path(self.shapefile_dir)
-        if self.human_influence_path:
-            self.human_influence_path = Path(self.human_influence_path)
-
-
-class CaravanifyParquet:
-    def __init__(self, config: CaravanifyParquetConfig):
-        """
-        Initialize a CaravanifyParquet instance with the provided configuration.
+        Initialize CaravanDataSource.
 
         Args:
-            config: A CaravanifyParquetConfig object containing dataset directories, gauge ID prefix,
-                    and attribute settings.
-
-        Attributes:
-            time_series: Dictionary mapping gauge_id to its timeseries DataFrame.
-            static_attributes: DataFrame containing merged static attribute data.
+            base_path: Root directory containing hive-partitioned data
+            region: Optional specific region name (e.g., 'camels').
+                   If None, all regions are accessible.
         """
-        self.config = config
-        self.time_series: dict[str, pd.DataFrame] = {}  # {gauge_id: DataFrame}
-        self.static_attributes = pd.DataFrame()  # Combined static attributes
+        self.base_path = Path(base_path)
+        self.region = region
 
-    def get_all_gauge_ids(self) -> list[str]:
-        """
-        Retrieve all gauge IDs from the timeseries directory based on the configured prefix.
+        # Build glob patterns for reuse
+        region_pattern = f"REGION_NAME={region}" if region else "REGION_NAME=*"
 
-        Returns:
-            A sorted list of gauge ID strings.
-
-        Raises:
-            FileNotFoundError: If the timeseries directory does not exist.
-            ValueError: If any gauge IDs in the directory do not match the expected prefix.
-        """
-        ts_dir = self.config.timeseries_dir / self.config.gauge_id_prefix
-
-        if not ts_dir.exists():
-            raise FileNotFoundError(
-                f"Timeseries directory not found for prefix {self.config.gauge_id_prefix}: {ts_dir}"
-            )
-
-        gauge_ids = [f.stem for f in ts_dir.glob("*.parquet")]
-        prefix = f"{self.config.gauge_id_prefix}_"
-        invalid_ids = [gid for gid in gauge_ids if not gid.startswith(prefix)]
-        if invalid_ids:
-            raise ValueError(f"Found gauge IDs that don't match prefix {prefix}: {invalid_ids}")
-
-        return sorted(gauge_ids)
-
-    def load_stations(self, gauge_ids: list[str]) -> None:
-        """
-        Load station data for the specified gauge IDs.
-
-        This method validates the provided gauge IDs and loads both the timeseries and static attribute data.
-
-        Args:
-            gauge_ids: List of gauge ID strings to load.
-
-        Raises:
-            ValueError: If any gauge ID does not conform to the expected format.
-            FileNotFoundError: If required timeseries files are missing.
-        """
-        self._validate_gauge_ids(gauge_ids)
-        self._load_timeseries(gauge_ids)
-        self._load_static_attributes(gauge_ids)
-
-    def _load_timeseries(self, gauge_ids: list[str]) -> None:
-        """
-        Load timeseries data for the specified gauge IDs from parquet files in parallel using multithreading.
-
-        Each parquet file is expected to have a 'date' column which will be parsed as dates.
-        The gauge ID is inferred from the file name.
-
-        Args:
-            gauge_ids: List of gauge ID strings for which to load timeseries data.
-
-        Raises:
-            FileNotFoundError: If a required timeseries file is not found.
-        """
-        ts_dir = self.config.timeseries_dir / self.config.gauge_id_prefix
-        file_paths = []
-        for gauge_id in gauge_ids:
-            fp = ts_dir / f"{gauge_id}.parquet"
-            if not fp.exists():
-                raise FileNotFoundError(f"Timeseries file {fp} not found")
-            file_paths.append(fp)
-
-        def read_single(fp: Path) -> pd.DataFrame:
-            df = pd.read_parquet(fp, engine="pyarrow")
-            if "date" in df.columns and not pd.api.types.is_datetime64_any_dtype(df["date"]):
-                df["date"] = pd.to_datetime(df["date"])
-            df["gauge_id"] = fp.stem
-            return df
-
-        with ThreadPoolExecutor() as executor:
-            dfs = list(executor.map(read_single, file_paths))
-
-        for df in dfs:
-            self.time_series[df["gauge_id"].iloc[0]] = df
-
-    def _load_static_attributes(self, gauge_ids: list[str]) -> None:
-        """
-        Load and merge static attribute data for the specified gauge IDs.
-
-        This method reads various attribute parquet files based on the enabled attribute flags in the configuration,
-        filters the data to include only rows with gauge IDs from the provided list, and merges them horizontally.
-
-        Args:
-            gauge_ids: List of gauge ID strings for which to load static attributes.
-        """
-        attr_dir = self.config.attributes_dir / self.config.gauge_id_prefix
-        gauge_ids_set = set(gauge_ids)
-        dfs = []
-
-        def load_attributes(file_name: str) -> pd.DataFrame | None:
-            """
-            Load attribute data from a parquet file, filter by gauge IDs, and set 'gauge_id' as the index.
-
-            Args:
-                file_name: Name of the parquet file to load.
-
-            Returns:
-                A DataFrame with filtered attribute data, or None if the file does not exist.
-            """
-            file_path = attr_dir / file_name
-            if not file_path.exists():
-                return None
-
-            df = pd.read_parquet(file_path, engine="pyarrow")
-            # Ensure gauge_id is treated as string
-            if "gauge_id" in df.columns:
-                df["gauge_id"] = df["gauge_id"].astype(str)
-            df = df[df["gauge_id"].isin(gauge_ids_set)]
-            df.set_index("gauge_id", inplace=True)
-            return df
-
-        # Load enabled attribute types based on configuration flags
-        if self.config.use_other_attributes:
-            other_df = load_attributes(f"attributes_other_{self.config.gauge_id_prefix}.parquet")
-            if other_df is not None:
-                dfs.append(other_df)
-
-        if self.config.use_hydroatlas_attributes:
-            hydro_df = load_attributes(f"attributes_hydroatlas_{self.config.gauge_id_prefix}.parquet")
-            if hydro_df is not None:
-                dfs.append(hydro_df)
-
-        if self.config.use_caravan_attributes:
-            caravan_df = load_attributes(f"attributes_caravan_{self.config.gauge_id_prefix}.parquet")
-            if caravan_df is not None:
-                dfs.append(caravan_df)
-
-        # Concatenate all DataFrames horizontally if any were loaded
-        if dfs:
-            self.static_attributes = pd.concat(dfs, axis=1, join="outer").reset_index()
-
-    def _validate_gauge_ids(self, gauge_ids: list[str]) -> None:
-        """
-        Validate that each gauge ID in the provided list starts with the configured prefix.
-
-        Args:
-            gauge_ids: List of gauge ID strings to validate.
-
-        Raises:
-            ValueError: If any gauge ID does not start with the expected prefix.
-        """
-        prefix = f"{self.config.gauge_id_prefix}_"
-        for gid in gauge_ids:
-            if not gid.startswith(prefix):
-                raise ValueError(f"Gauge ID {gid} must start with '{prefix}'")
-
-    def get_time_series(self) -> pd.DataFrame:
-        """
-        Concatenate and return all loaded timeseries data as a single DataFrame.
-
-        The returned DataFrame includes the 'gauge_id' and 'date' columns along with all other available columns.
-
-        Returns:
-            A pandas DataFrame containing the combined timeseries data.
-        """
-        if not self.time_series:
-            return pd.DataFrame()
-        df = pd.concat(self.time_series.values(), ignore_index=True)
-        return df[["gauge_id", "date"] + [c for c in df.columns if c not in ("gauge_id", "date")]]
-
-    def get_static_attributes(self) -> pd.DataFrame:
-        """
-        Return a copy of the merged static attributes DataFrame.
-
-        Returns:
-            A pandas DataFrame containing the static attributes.
-        """
-        return self.static_attributes.copy()
-
-    def get_shapefiles(self) -> gpd.GeoDataFrame:
-        """
-        Load and return shapefile data as a GeoDataFrame.
-
-        Constructs the shapefile path using the configured shapefile directory and gauge ID prefix,
-        and uses geopandas to read the shapefile.
-
-        Returns:
-            A GeoDataFrame containing the shapefile data.
-
-        Raises:
-            FileNotFoundError: If the shapefile is not found at the constructed path.
-        """
-        shapefile_path = (
-            self.config.shapefile_dir / self.config.gauge_id_prefix / f"{self.config.gauge_id_prefix}_basin_shapes.shp"
+        self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+        self._attr_glob = str(
+            self.base_path / region_pattern / "data_type=attributes" / "attribute_type=*" / "data.parquet"
         )
-        if not shapefile_path.exists():
-            raise FileNotFoundError(f"Shapefile {shapefile_path} not found")
 
-        gdf = gpd.read_file(shapefile_path)
-        return gdf
+        # For shapefiles, we need a slightly different approach
+        self._shapefile_pattern = self.base_path / region_pattern / "data_type=shapefiles"
 
-    def filter_gauge_ids_by_human_influence(
-        self,
-        gauge_ids: list[str],
-        categories: str | list[str],
-    ) -> tuple[list[str], list[str]]:
+    def list_regions(self) -> list[str]:
         """
-        Filter a list of gauge IDs by human influence category.
-
-        Args:
-            gauge_ids: List of gauge IDs to filter
-            categories: String or List of human influence categories to keep
-                        (e.g., 'High', 'Medium', 'Low')
+        List all available regions using filesystem glob.
 
         Returns:
-            Filtered list of gauge IDs matching the specified influence categories
-            and a list of discarded gauge IDs that did not match the criteria.
-
-        Raises:
-            IOError: If the human influence data file cannot be loaded.
-            ValueError: If the specified categories are not found in the data.
+            List of region names
         """
-        # Load human influence data
+        region_dirs = self.base_path.glob("REGION_NAME=*")
+        regions = [d.name.split("=")[1] for d in region_dirs if d.is_dir()]
+        return sorted(regions)
+
+    def list_gauge_ids(self) -> list[str]:
+        """
+        List all available gauge IDs using lazy schema inspection.
+
+        Returns:
+            List of unique gauge IDs
+        """
         try:
-            human_influence_df = pd.read_parquet(self.config.human_influence_path, engine="pyarrow")
-        except Exception as e:
-            raise OSError(f"Failed to load human influence Parquet data: {e}") from e
+            # Use union_by_name to handle schema differences
+            lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
+            # Use lazy execution to get unique gauge_ids and ensure they're strings
+            gauge_ids = lf.select("gauge_id").unique().collect()["gauge_id"]
+            # Convert to strings in case hive partitioning parsed them as integers
+            gauge_ids = [str(gid) for gid in gauge_ids.to_list()]
+            return sorted(gauge_ids)
+        except Exception:
+            # Fallback to filesystem if scan fails
+            gauge_dirs = Path(self._ts_glob).parent.glob("gauge_id=*")
+            gauge_ids = [d.name.split("=")[1] for d in gauge_dirs if d.is_dir()]
+            return sorted(gauge_ids)
 
-        # Verify human influence data has required columns
-        required_cols = ["gauge_id", "human_influence_category"]
-        missing_cols = [col for col in required_cols if col not in human_influence_df.columns]
-        if missing_cols:
-            raise ValueError(f"Human influence data missing required columns: {missing_cols}")
+    def list_timeseries_variables(self) -> list[str]:
+        """
+        List all available timeseries variables using schema inspection.
 
-        # Convert categories to list if a string was provided
-        if isinstance(categories, str):
-            categories = [categories]
+        Returns:
+            List of variable names (excluding metadata columns)
+        """
+        try:
+            lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
+            schema = lf.collect_schema()
 
-        # Check if specified categories exist in the data
-        available_categories = human_influence_df["human_influence_category"].unique()
-        invalid_categories = [cat for cat in categories if cat not in available_categories]
-        if invalid_categories:
-            raise ValueError(
-                f"Invalid categories: {invalid_categories}. Available categories: {available_categories.tolist()}"
+            # Exclude partition columns and date column
+            exclude_cols = {"REGION_NAME", "gauge_id", "data_type", "date"}
+            variables = [col for col in schema if col not in exclude_cols]
+            return sorted(variables)
+        except Exception:
+            # Return empty list if no files found
+            return []
+
+    def list_static_attributes(self, attribute_types: list[str] | None = None) -> list[str]:
+        """
+        List all available static attributes using schema inspection.
+
+        Args:
+            attribute_types: Optional list of attribute types to include
+                           (e.g., ['caravan', 'hydroatlas'])
+
+        Returns:
+            List of attribute column names
+        """
+        # First get all parquet files to union their schemas
+        from glob import glob
+
+        files = glob(self._attr_glob)
+
+        if not files:
+            return []
+
+        # Collect all unique columns from all files
+        all_columns = set()
+        for file in files:
+            try:
+                lf = pl.scan_parquet(file, hive_partitioning=True, n_rows=0)
+                schema = lf.collect_schema()
+                all_columns.update(schema.names())
+            except Exception:
+                continue
+
+        # Exclude partition columns and gauge_id
+        exclude_cols = {"REGION_NAME", "attribute_type", "data_type", "gauge_id"}
+        attributes = [col for col in all_columns if col not in exclude_cols]
+        return sorted(attributes)
+
+    def get_date_ranges(self, gauge_ids: list[str] | None = None) -> pl.LazyFrame:
+        """
+        Get date ranges for gauges as a LazyFrame.
+
+        Args:
+            gauge_ids: Optional list of gauge IDs to filter
+
+        Returns:
+            LazyFrame with columns: REGION_NAME, gauge_id, min_date, max_date
+        """
+        lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
+
+        # Handle date dtype normalization if stored as string
+        schema = lf.collect_schema()
+        if schema["date"] == pl.Utf8:
+            lf = lf.with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
+        elif schema["date"] == pl.Datetime:
+            lf = lf.with_columns(pl.col("date").cast(pl.Date))
+
+        # Apply gauge filter if specified
+        if gauge_ids:
+            lf = lf.filter(pl.col("gauge_id").is_in(gauge_ids))
+
+        # Group by region and gauge to get date ranges
+        return lf.group_by(["REGION_NAME", "gauge_id"]).agg(
+            pl.col("date").min().alias("min_date"), pl.col("date").max().alias("max_date")
+        )
+
+    def get_timeseries(
+        self,
+        gauge_ids: list[str] | None = None,
+        variables: list[str] | None = None,
+        date_range: tuple[str, str] | None = None,
+    ) -> pl.LazyFrame:
+        """
+        Get timeseries data as a LazyFrame.
+
+        Args:
+            gauge_ids: Optional list of gauge IDs to filter (uses partition pruning)
+            variables: Optional list of variables to select
+            date_range: Optional tuple of (start_date, end_date) as strings
+
+        Returns:
+            LazyFrame with timeseries data
+        """
+        lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
+
+        # Handle date dtype normalization if stored as string
+        schema = lf.collect_schema()
+        if schema["date"] == pl.Utf8:
+            lf = lf.with_columns(pl.col("date").str.strptime(pl.Date, "%Y-%m-%d"))
+        elif schema["date"] == pl.Datetime:
+            lf = lf.with_columns(pl.col("date").cast(pl.Date))
+
+        # Apply filters - Polars optimizes partition pruning automatically
+        if gauge_ids:
+            lf = lf.filter(pl.col("gauge_id").is_in(gauge_ids))
+
+        if date_range:
+            start_date, end_date = date_range
+            # Convert string dates to Date type for comparison
+            lf = lf.filter(
+                pl.col("date").is_between(
+                    pl.lit(start_date).str.strptime(pl.Date, "%Y-%m-%d"),
+                    pl.lit(end_date).str.strptime(pl.Date, "%Y-%m-%d"),
+                )
             )
 
-        # Filter human influence data to include only specified categories and gauge IDs
-        filtered_hi = human_influence_df[
-            (human_influence_df["human_influence_category"].isin(categories))
-            & (human_influence_df["gauge_id"].isin(gauge_ids))
-        ]
+        if variables:
+            # Keep metadata columns plus requested variables
+            keep_cols = {"REGION_NAME", "gauge_id", "date"} | set(variables)
+            available_cols = set(lf.collect_schema().names())
+            cols_to_select = list(keep_cols & available_cols)
+            lf = lf.select(cols_to_select)
 
-        # Get list of gauge_ids that match the criteria
-        filtered_gauge_ids = filtered_hi["gauge_id"].unique().tolist()
+        return lf
 
-        print(f"Original gauge_ids: {len(gauge_ids)}")
-        print(f"Filtered gauge_ids: {len(filtered_gauge_ids)}")
+    def get_static_attributes(
+        self,
+        gauge_ids: list[str] | None = None,
+        columns: list[str] | None = None,
+        attribute_types: list[str] | None = None,
+    ) -> pl.LazyFrame:
+        """
+        Get static attributes as a LazyFrame.
 
-        if not filtered_gauge_ids:
-            print("No gauge_ids matched the specified human influence categories.")
-            return [], list(gauge_ids)
+        Args:
+            gauge_ids: Optional list of gauge IDs to filter
+            columns: Optional list of attribute columns to select
+            attribute_types: Optional list of attribute types (e.g., ['caravan', 'hydroatlas'])
 
-        discarded_gauge_ids = list(set(gauge_ids) - set(filtered_gauge_ids))
+        Returns:
+            LazyFrame with static attributes (long format by default)
+        """
+        from glob import glob
 
-        return filtered_gauge_ids, discarded_gauge_ids
+        # Get list of files that match the pattern
+        files = glob(self._attr_glob)
+
+        if not files:
+            # Return empty LazyFrame with expected schema when no files found
+            empty_df = pl.DataFrame(
+                {
+                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                    "gauge_id": pl.Series([], dtype=pl.Utf8),
+                    "attribute_type": pl.Series([], dtype=pl.Utf8),
+                }
+            )
+            if columns:
+                for col in columns:
+                    empty_df = empty_df.with_columns(pl.lit(None).alias(col))
+            return empty_df.lazy()
+
+        # Read each file separately and union them
+        # This approach handles schema differences better
+        lazy_frames = []
+
+        for file in files:
+            try:
+                # Scan with hive partitioning to get partition columns
+                lf = pl.scan_parquet(file, hive_partitioning=True, rechunk=False, low_memory=True)
+
+                # Force early validation by checking schema - this will fail for corrupted files
+                _ = lf.collect_schema()
+
+                # Apply attribute_type filter if needed
+                if attribute_types and "attribute_type" in lf.collect_schema().names():
+                    lf = lf.filter(pl.col("attribute_type").is_in(attribute_types))
+
+                # Apply gauge filter if needed
+                if gauge_ids:
+                    lf = lf.filter(pl.col("gauge_id").is_in(gauge_ids))
+
+                # Select columns if specified
+                if columns:
+                    # Keep metadata columns plus requested attributes
+                    keep_cols = {"REGION_NAME", "gauge_id", "attribute_type"} | set(columns)
+                    available_cols = set(lf.collect_schema().names())
+                    cols_to_select = list(keep_cols & available_cols)
+
+                    # Only add if we have columns beyond just metadata
+                    if len(cols_to_select) > 3 or not columns:
+                        lf = lf.select(cols_to_select)
+                        lazy_frames.append(lf)
+                else:
+                    lazy_frames.append(lf)
+
+            except Exception as e:
+                # Skip files that can't be read
+                print(f"Warning: Could not read {file}: {e}")
+                continue
+
+        if not lazy_frames:
+            # Return empty LazyFrame with expected schema if no valid files were read
+            empty_df = pl.DataFrame(
+                {
+                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                    "gauge_id": pl.Series([], dtype=pl.Utf8),
+                    "attribute_type": pl.Series([], dtype=pl.Utf8),
+                }
+            )
+            if columns:
+                for col in columns:
+                    empty_df = empty_df.with_columns(pl.lit(None).alias(col))
+            return empty_df.lazy()
+
+        # Union all frames, handling different schemas
+        result = lazy_frames[0]
+        for lf in lazy_frames[1:]:
+            # Use diagonal concatenation to handle different schemas
+            result = pl.concat([result, lf], how="diagonal_relaxed")
+
+        return result
+
+    def get_geometries(self, gauge_ids: list[str] | None = None) -> gpd.GeoDataFrame:
+        """
+        Get watershed geometries as a GeoDataFrame.
+
+        Args:
+            gauge_ids: Optional list of gauge IDs to filter
+
+        Returns:
+            GeoDataFrame with watershed geometries
+        """
+        # For shapefiles, we need to handle differently since they're not partitioned
+        if self.region:
+            shapefile_path = self._shapefile_pattern / f"{self.region}_shapes.shp"
+            if not shapefile_path.exists():
+                raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
+
+            gdf = gpd.read_file(shapefile_path)
+
+            if gauge_ids:
+                # Assuming shapefile has a gauge_id column
+                gdf = gdf[gdf["gauge_id"].isin(gauge_ids)]
+
+            return gdf
+        else:
+            # If no region specified, need to load from all regions
+            gdfs = []
+            for region_dir in self._shapefile_pattern.parent.glob("REGION_NAME=*"):
+                region_name = region_dir.name.split("=")[1]
+                shapefile_path = region_dir / "data_type=shapefiles" / f"{region_name}_shapes.shp"
+
+                if shapefile_path.exists():
+                    gdf = gpd.read_file(shapefile_path)
+                    gdf["REGION_NAME"] = region_name  # Add region column
+                    gdfs.append(gdf)
+
+            if not gdfs:
+                raise FileNotFoundError("No shapefiles found")
+
+            combined_gdf = pd.concat(gdfs, ignore_index=True)
+
+            if gauge_ids:
+                combined_gdf = combined_gdf[combined_gdf["gauge_id"].isin(gauge_ids)]
+
+            return combined_gdf
