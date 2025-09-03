@@ -41,6 +41,7 @@ class CompositePipeline:
         self.group_identifier = group_identifier
         self._fitted_steps: list[PerBasinPipeline | GlobalPipeline] = []
         self._is_fitted = False
+        self._group_mapping = {}  # Maps numeric indices back to original group values
 
     def __repr__(self) -> str:
         return f"CompositePipeline(steps={self.steps}, group_identifier='{self.group_identifier}')"
@@ -70,12 +71,41 @@ class CompositePipeline:
             columns: Feature columns to include (group_identifier added automatically)
 
         Returns:
-            2D numpy array with features as first columns, group_identifier as last column
+            2D numpy array with features as first columns, group_identifier as last column (encoded as numeric)
         """
-        # Select feature columns + group identifier. This sets the group_identifier in last position
-        selected_cols = columns + [self.group_identifier]
-        array_data = df.select(selected_cols).to_numpy()
-
+        # Select feature columns and fill nulls with NaN for numeric handling
+        features_df = df.select(columns).fill_null(float('nan'))
+        features_array = features_df.to_numpy()
+        
+        # Get group identifiers
+        group_values = df[self.group_identifier].to_numpy()
+        
+        # Encode string group identifiers as numeric values
+        unique_groups = np.unique(group_values)
+        
+        # Create or update group mapping
+        if not self._group_mapping:
+            # First time: create mapping
+            self._group_mapping = {i: group for i, group in enumerate(unique_groups)}
+        else:
+            # Subsequent calls: ensure all groups are in mapping
+            existing_groups = set(self._group_mapping.values())
+            new_groups = set(unique_groups) - existing_groups
+            if new_groups:
+                next_idx = max(self._group_mapping.keys()) + 1 if self._group_mapping else 0
+                for group in new_groups:
+                    self._group_mapping[next_idx] = group
+                    next_idx += 1
+        
+        # Create reverse mapping for encoding
+        group_to_idx = {v: k for k, v in self._group_mapping.items()}
+        
+        # Encode groups as numeric values
+        numeric_groups = np.array([float(group_to_idx[g]) for g in group_values]).reshape(-1, 1)
+        
+        # Combine features with numeric group identifiers
+        array_data = np.hstack([features_array, numeric_groups])
+        
         return array_data
 
     def _numpy_to_dataframe_update(
