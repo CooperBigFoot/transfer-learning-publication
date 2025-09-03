@@ -3,7 +3,9 @@
     "allow": [
       "Bash(uv run pytest:*)",
       "Bash(uv run ruff:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(uv sync:*)",
+      "Bash(uv run:*)"
     ],
     "deny": [],
     "ask": []
