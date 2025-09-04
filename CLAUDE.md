@@ -105,3 +105,77 @@ except:
 - Format code: `uv run ruff format`
 - Check and fix linting issues: `uv run ruff check --fix`
 - Run both formatting and linting: `uv run ruff format && uv run ruff check --fix`
+
+# Testing Structure and Conventions
+
+Follow these patterns for all test files in this project:
+
+## Test Organization
+
+- **Class-based structure**: Each function gets a `TestFunctionName` class (e.g., `TestFillNaColumns`, `TestClipColumns`)
+- **One test file per cleaner function**: `test_function_name.py` pattern
+- **Descriptive test method names**: Use clear, specific names like `test_fill_single_integer_column`, `test_flag_columns_with_float_nans`
+
+## Test Categories to Cover
+
+### 1. Basic Functionality
+- Core feature with simple inputs
+- Single vs multiple column operations  
+- Different data types (int, float, various numeric types)
+- Preserve non-missing values unchanged
+
+### 2. Flag/Binary Column Features (if applicable)
+- Default behavior (no extra columns)
+- Flag creation with correct naming (`{column}_was_filled`)
+- UInt8 data type for PyTorch compatibility
+- Proper flag positioning (at end of DataFrame)
+- Correct flag values (0=original, 1=modified)
+
+### 3. Error Handling
+- Non-existent columns → ValueError with specific message
+- Invalid column types → ValueError with type info
+- Empty inputs → Warning + unchanged return
+- Mixed valid/invalid columns → ValueError on first invalid
+
+### 4. Edge Cases & Data Preservation
+- Empty DataFrames
+- All-null/all-NaN columns
+- No changes needed (all values valid)
+- Column order preservation
+- Data type preservation
+- LazyFrame lazy evaluation maintained
+
+## Test Implementation Patterns
+
+### Assert Patterns
+```python
+# Direct DataFrame equality
+assert result.equals(expected)
+
+# Individual value checks for complex cases
+assert result["column"][index] == expected_value
+
+# Schema/type verification
+assert result.schema["column"] == pl.ExpectedType
+
+# List conversion for easy comparison
+assert result["column"].to_list() == [expected, values]
+```
+
+### Fixtures (when helpful)
+- Use pytest fixtures for complex or reused test data
+- Name fixtures descriptively (e.g., `basic_data`, `interleaved_nulls_data`)
+
+### LazyFrame Testing
+- Always verify function returns LazyFrame (not DataFrame)
+- Test that operations don't force collection
+- Collect only when needed for assertions
+
+### Error Testing
+```python
+with pytest.raises(ValueError, match="specific message"):
+    function_call_that_should_fail()
+
+with pytest.warns(UserWarning, match="warning message"):
+    function_call_that_warns()
+```
