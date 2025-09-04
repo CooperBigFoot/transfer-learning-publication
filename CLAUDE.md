@@ -106,6 +106,15 @@ except:
 - Check and fix linting issues: `uv run ruff check --fix`
 - Run both formatting and linting: `uv run ruff format && uv run ruff check --fix`
 
+## Test Coverage
+
+**Use pytest-cov to measure test coverage.**
+
+- Basic coverage report: `uv run pytest --cov=src/transfer_learning_publication tests/`
+- Coverage with missing lines: `uv run pytest --cov=src/transfer_learning_publication --cov-report=term-missing tests/`
+- Generate HTML coverage report: `uv run pytest --cov=src/transfer_learning_publication --cov-report=html tests/`
+  - Open `htmlcov/index.html` in browser for detailed coverage visualization
+
 # Testing Structure and Conventions
 
 Follow these patterns for all test files in this project:

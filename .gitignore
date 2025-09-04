@@ -12,6 +12,9 @@ wheels/
 # Mac OS
 .DS_Store
 
+# Test coverage reports
+htmlcov/
+
 scratchpad/
 
 data/
