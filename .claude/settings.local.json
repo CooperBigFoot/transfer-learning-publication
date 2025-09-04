@@ -24,7 +24,8 @@
       "Read(/Users/cooper/Desktop/data_to_hive/**)",
       "Read(/Users/cooper/Desktop/data_to_hive/**)",
       "Read(/Users/cooper/Desktop/data_to_hive/timeseries/**)",
-      "Read(/Users/cooper/Desktop/data_to_hive/timeseries/csv/**)"
+      "Read(/Users/cooper/Desktop/data_to_hive/timeseries/csv/**)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

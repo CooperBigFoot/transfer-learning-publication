@@ -339,3 +339,154 @@ class CaravanDataSource:
                 combined_gdf = combined_gdf[combined_gdf["gauge_id"].isin(gauge_ids)]
 
             return combined_gdf
+
+    def write_timeseries(
+        self, df: pl.DataFrame | pl.LazyFrame, output_base_path: str | Path, overwrite: bool = False
+    ) -> None:
+        """
+        Write timeseries data to hive-partitioned parquet files.
+
+        Creates structure: REGION_NAME={region}/data_type=timeseries/gauge_id={id}/data.parquet
+
+        Args:
+            df: DataFrame or LazyFrame with timeseries data. Must contain 'gauge_id' column.
+            output_base_path: Root directory for output
+            overwrite: If False, raise error if gauge partitions exist. If True, overwrite.
+
+        Raises:
+            ValueError: If region not set, gauge_id column missing, or existing data when overwrite=False
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Validate region is set
+        if self.region is None:
+            raise ValueError("Region must be set to write timeseries. Initialize with a specific region.")
+
+        # Convert LazyFrame to DataFrame if needed
+        if isinstance(df, pl.LazyFrame):
+            logger.warning(
+                "LazyFrame passed to write_timeseries - collecting to DataFrame. This may use significant memory."
+            )
+            df = df.collect()
+
+        # Validate required columns
+        if "gauge_id" not in df.columns:
+            raise ValueError("DataFrame must contain 'gauge_id' column for partitioning")
+
+        # Warn if date column missing (expected but not required)
+        if "date" not in df.columns:
+            logger.warning("No 'date' column found in timeseries data")
+
+        # Build output path
+        output_path = Path(output_base_path) / f"REGION_NAME={self.region}" / "data_type=timeseries"
+
+        # Get unique gauge IDs
+        unique_gauges = df["gauge_id"].unique().to_list()
+        existing_gauges = []
+
+        # Check for existing partitions
+        if output_path.exists():
+            for gauge_id in unique_gauges:
+                gauge_path = output_path / f"gauge_id={gauge_id}"
+                if gauge_path.exists():
+                    existing_gauges.append(str(gauge_id))
+
+            if existing_gauges:
+                if not overwrite:
+                    n_more = len(existing_gauges) - 5
+                    raise ValueError(
+                        f"Gauge partitions already exist: {', '.join(existing_gauges[:5])}"
+                        f"{f' and {n_more} more' if n_more > 0 else ''}"
+                        "\nSet overwrite=True to replace existing data."
+                    )
+                else:
+                    logger.warning(f"Overwriting {len(existing_gauges)} existing gauge partition(s)")
+
+        # Write each gauge_id to its own partition with data.parquet filename
+        # Group by gauge_id and write each group separately
+        for gauge_id in unique_gauges:
+            gauge_df = df.filter(pl.col("gauge_id") == gauge_id)
+            gauge_path = output_path / f"gauge_id={gauge_id}"
+            gauge_path.mkdir(parents=True, exist_ok=True)
+
+            # Remove the gauge_id column since it's in the partition path
+            gauge_df = gauge_df.drop("gauge_id")
+            gauge_df.write_parquet(gauge_path / "data.parquet", use_pyarrow=True, statistics=True)
+
+        logger.info(f"Wrote timeseries for {len(unique_gauges)} gauges to {output_path}")
+
+    def write_static_attributes(
+        self, df: pl.DataFrame | pl.LazyFrame, output_base_path: str | Path, overwrite: bool = False
+    ) -> None:
+        """
+        Write static attributes to hive-partitioned parquet files.
+
+        Creates structure: REGION_NAME={region}/data_type=attributes/attribute_type={type}/data.parquet
+
+        Args:
+            df: DataFrame or LazyFrame with attributes. Must contain 'gauge_id' and 'attribute_type' columns.
+            output_base_path: Root directory for output
+            overwrite: If False, raise error if attribute type partitions exist. If True, overwrite.
+
+        Raises:
+            ValueError: If region not set, required columns missing, or existing data when overwrite=False
+        """
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Validate region is set
+        if self.region is None:
+            raise ValueError("Region must be set to write attributes. Initialize with a specific region.")
+
+        # Convert LazyFrame to DataFrame if needed
+        if isinstance(df, pl.LazyFrame):
+            logger.warning(
+                "LazyFrame passed to write_static_attributes - collecting to DataFrame. This may use significant memory."
+            )
+            df = df.collect()
+
+        # Validate required columns
+        if "gauge_id" not in df.columns:
+            raise ValueError("DataFrame must contain 'gauge_id' column")
+        if "attribute_type" not in df.columns:
+            raise ValueError("DataFrame must contain 'attribute_type' column for partitioning")
+
+        # Build output path
+        output_path = Path(output_base_path) / f"REGION_NAME={self.region}" / "data_type=attributes"
+
+        # Get unique attribute types
+        unique_types = df["attribute_type"].unique().to_list()
+        existing_types = []
+
+        # Check for existing attribute type partitions
+        if output_path.exists():
+            for attr_type in unique_types:
+                type_path = output_path / f"attribute_type={attr_type}"
+                if type_path.exists():
+                    existing_types.append(str(attr_type))
+
+            if existing_types:
+                if not overwrite:
+                    raise ValueError(
+                        f"Attribute type partitions already exist: {', '.join(existing_types)}"
+                        "\nSet overwrite=True to replace existing data."
+                    )
+                else:
+                    logger.warning(f"Overwriting existing attribute type(s): {', '.join(existing_types)}")
+
+        # Write each attribute_type to its own partition with data.parquet filename
+        # Group by attribute_type and write each group separately
+        for attr_type in unique_types:
+            type_df = df.filter(pl.col("attribute_type") == attr_type)
+            type_path = output_path / f"attribute_type={attr_type}"
+            type_path.mkdir(parents=True, exist_ok=True)
+
+            # Remove the attribute_type column since it's in the partition path
+            type_df = type_df.drop("attribute_type")
+            type_df.write_parquet(type_path / "data.parquet", use_pyarrow=True, statistics=True)
+
+        n_gauges = df["gauge_id"].n_unique()
+        logger.info(f"Wrote {len(unique_types)} attribute type(s) for {n_gauges} gauges to {output_path}")

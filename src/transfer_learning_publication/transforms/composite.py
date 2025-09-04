@@ -74,7 +74,7 @@ class CompositePipeline:
             2D numpy array with features as first columns, group_identifier as last column (encoded as numeric)
         """
         # Select feature columns and fill nulls with NaN for numeric handling
-        features_df = df.select(columns).fill_null(float('nan'))
+        features_df = df.select(columns).fill_null(float("nan"))
         features_array = features_df.to_numpy()
 
         # Get group identifiers

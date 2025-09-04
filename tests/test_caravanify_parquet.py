@@ -570,3 +570,657 @@ class TestPartitionPruning:
         ts_data = ds.get_timeseries(date_range=("2020-01-01", "2020-01-01")).collect()
         assert len(ts_data) == 5  # 5 gauges * 1 day
         assert ts_data["date"].unique()[0] == date(2020, 1, 1)
+
+
+class TestWriteTimeseries:
+    """Test write_timeseries method."""
+
+    def test_write_timeseries_basic(self, tmp_path):
+        """Test basic timeseries writing functionality."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Create sample timeseries data
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G001", "G002", "G002"],
+                "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02"],
+                "streamflow": [10.5, 12.0, 15.2, 14.8],
+                "temperature": [5.0, 6.2, 4.8, 5.5],
+            }
+        )
+
+        ds.write_timeseries(df, tmp_path)
+
+        # Verify directory structure
+        expected_path = tmp_path / "REGION_NAME=test_region" / "data_type=timeseries"
+        assert expected_path.exists()
+
+        # Check gauge partitions
+        gauge1_path = expected_path / "gauge_id=G001" / "data.parquet"
+        gauge2_path = expected_path / "gauge_id=G002" / "data.parquet"
+        assert gauge1_path.exists()
+        assert gauge2_path.exists()
+
+        # Verify data can be read back
+        gauge1_data = pl.read_parquet(gauge1_path)
+        assert len(gauge1_data) == 2
+        assert "gauge_id" not in gauge1_data.columns  # Should be removed as it's in partition
+        assert set(gauge1_data.columns) == {"date", "streamflow", "temperature"}
+
+    def test_write_timeseries_with_lazyframe(self, tmp_path):
+        """Test writing with LazyFrame input."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        ).lazy()
+
+        ds.write_timeseries(df, tmp_path)
+
+        # Verify data was written
+        expected_file = tmp_path / "REGION_NAME=test_region" / "data_type=timeseries" / "gauge_id=G001" / "data.parquet"
+        assert expected_file.exists()
+
+    def test_write_timeseries_no_region_error(self, tmp_path):
+        """Test that writing without region raises error."""
+        ds = CaravanDataSource(tmp_path)  # No region specified
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
+
+        with pytest.raises(ValueError, match="Region must be set to write timeseries"):
+            ds.write_timeseries(df, tmp_path)
+
+    def test_write_timeseries_missing_gauge_id_error(self, tmp_path):
+        """Test that missing gauge_id column raises error."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
+
+        with pytest.raises(ValueError, match="DataFrame must contain 'gauge_id' column"):
+            ds.write_timeseries(df, tmp_path)
+
+    def test_write_timeseries_missing_date_warning(self, tmp_path, caplog):
+        """Test warning when date column is missing."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "streamflow": [10.5],
+            }
+        )
+
+        ds.write_timeseries(df, tmp_path)
+
+        # Check for warning in log records
+        assert "No 'date' column found" in caplog.text
+
+    def test_write_timeseries_overwrite_false_error(self, tmp_path):
+        """Test that existing partitions raise error when overwrite=False."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
+
+        # First write should succeed
+        ds.write_timeseries(df, tmp_path)
+
+        # Second write should fail with overwrite=False
+        with pytest.raises(ValueError, match="Gauge partitions already exist"):
+            ds.write_timeseries(df, tmp_path, overwrite=False)
+
+    def test_write_timeseries_overwrite_true_success(self, tmp_path):
+        """Test that overwrite=True replaces existing data."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # First dataset
+        df1 = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
+        ds.write_timeseries(df1, tmp_path)
+
+        # Second dataset with different values
+        df2 = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [99.9],
+            }
+        )
+        ds.write_timeseries(df2, tmp_path, overwrite=True)
+
+        # Verify new data was written
+        written_file = tmp_path / "REGION_NAME=test_region" / "data_type=timeseries" / "gauge_id=G001" / "data.parquet"
+        data = pl.read_parquet(written_file)
+        assert data["streamflow"][0] == 99.9
+
+    def test_write_timeseries_multiple_gauges(self, tmp_path):
+        """Test writing data for multiple gauges creates separate partitions."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G001", "G002", "G003"],
+                "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-01"],
+                "streamflow": [10.5, 12.0, 15.2, 8.8],
+            }
+        )
+
+        ds.write_timeseries(df, tmp_path)
+
+        # Check all gauge partitions exist
+        base_path = tmp_path / "REGION_NAME=test_region" / "data_type=timeseries"
+        assert (base_path / "gauge_id=G001" / "data.parquet").exists()
+        assert (base_path / "gauge_id=G002" / "data.parquet").exists()
+        assert (base_path / "gauge_id=G003" / "data.parquet").exists()
+
+        # Verify data separation
+        g001_data = pl.read_parquet(base_path / "gauge_id=G001" / "data.parquet")
+        g002_data = pl.read_parquet(base_path / "gauge_id=G002" / "data.parquet")
+        g003_data = pl.read_parquet(base_path / "gauge_id=G003" / "data.parquet")
+
+        assert len(g001_data) == 2
+        assert len(g002_data) == 1
+        assert len(g003_data) == 1
+
+    def test_write_timeseries_empty_dataframe(self, tmp_path):
+        """Test writing empty DataFrame."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Empty DataFrame with correct schema
+        df = pl.DataFrame(
+            {
+                "gauge_id": [],
+                "date": [],
+                "streamflow": [],
+            }
+        ).cast({"gauge_id": pl.Utf8, "date": pl.Utf8, "streamflow": pl.Float64})
+
+        ds.write_timeseries(df, tmp_path)
+
+        # Should create directory structure but no partition files
+        # Directory may or may not be created for empty data - this is implementation dependent
+        # The main thing is it shouldn't crash
+
+
+class TestWriteStaticAttributes:
+    """Test write_static_attributes method."""
+
+    def test_write_static_attributes_basic(self, tmp_path):
+        """Test basic static attributes writing functionality."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Create sample attributes data
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G002", "G003"],
+                "attribute_type": ["caravan", "caravan", "hydroatlas"],
+                "area": [100.5, 250.3, None],
+                "elevation": [500, 750, None],
+                "forest_cover": [None, None, 0.45],
+            }
+        )
+
+        ds.write_static_attributes(df, tmp_path)
+
+        # Verify directory structure
+        expected_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
+        assert expected_path.exists()
+
+        # Check attribute type partitions
+        caravan_path = expected_path / "attribute_type=caravan" / "data.parquet"
+        hydroatlas_path = expected_path / "attribute_type=hydroatlas" / "data.parquet"
+        assert caravan_path.exists()
+        assert hydroatlas_path.exists()
+
+        # Verify data can be read back
+        caravan_data = pl.read_parquet(caravan_path)
+        hydroatlas_data = pl.read_parquet(hydroatlas_path)
+
+        assert len(caravan_data) == 2
+        assert len(hydroatlas_data) == 1
+        assert "attribute_type" not in caravan_data.columns  # Should be removed as it's in partition
+        assert "attribute_type" not in hydroatlas_data.columns
+
+    def test_write_static_attributes_with_lazyframe(self, tmp_path):
+        """Test writing with LazyFrame input."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "attribute_type": ["caravan"],
+                "area": [100.5],
+            }
+        ).lazy()
+
+        ds.write_static_attributes(df, tmp_path)
+
+        # Verify data was written
+        expected_file = (
+            tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "attribute_type=caravan" / "data.parquet"
+        )
+        assert expected_file.exists()
+
+    def test_write_static_attributes_no_region_error(self, tmp_path):
+        """Test that writing without region raises error."""
+        ds = CaravanDataSource(tmp_path)  # No region specified
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "attribute_type": ["caravan"],
+                "area": [100.5],
+            }
+        )
+
+        with pytest.raises(ValueError, match="Region must be set to write attributes"):
+            ds.write_static_attributes(df, tmp_path)
+
+    def test_write_static_attributes_missing_gauge_id_error(self, tmp_path):
+        """Test that missing gauge_id column raises error."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "attribute_type": ["caravan"],
+                "area": [100.5],
+            }
+        )
+
+        with pytest.raises(ValueError, match="DataFrame must contain 'gauge_id' column"):
+            ds.write_static_attributes(df, tmp_path)
+
+    def test_write_static_attributes_missing_attribute_type_error(self, tmp_path):
+        """Test that missing attribute_type column raises error."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "area": [100.5],
+            }
+        )
+
+        with pytest.raises(ValueError, match="DataFrame must contain 'attribute_type' column"):
+            ds.write_static_attributes(df, tmp_path)
+
+    def test_write_static_attributes_overwrite_false_error(self, tmp_path):
+        """Test that existing partitions raise error when overwrite=False."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "attribute_type": ["caravan"],
+                "area": [100.5],
+            }
+        )
+
+        # First write should succeed
+        ds.write_static_attributes(df, tmp_path)
+
+        # Second write should fail with overwrite=False
+        with pytest.raises(ValueError, match="Attribute type partitions already exist"):
+            ds.write_static_attributes(df, tmp_path, overwrite=False)
+
+    def test_write_static_attributes_overwrite_true_success(self, tmp_path):
+        """Test that overwrite=True replaces existing data."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # First dataset
+        df1 = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "attribute_type": ["caravan"],
+                "area": [100.5],
+            }
+        )
+        ds.write_static_attributes(df1, tmp_path)
+
+        # Second dataset with different values
+        df2 = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "attribute_type": ["caravan"],
+                "area": [999.9],
+            }
+        )
+        ds.write_static_attributes(df2, tmp_path, overwrite=True)
+
+        # Verify new data was written
+        written_file = (
+            tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "attribute_type=caravan" / "data.parquet"
+        )
+        data = pl.read_parquet(written_file)
+        assert data["area"][0] == 999.9
+
+    def test_write_static_attributes_multiple_types(self, tmp_path):
+        """Test writing data for multiple attribute types creates separate partitions."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G002", "G001", "G003"],
+                "attribute_type": ["caravan", "caravan", "hydroatlas", "topo"],
+                "area": [100.5, 250.3, None, None],
+                "forest_cover": [None, None, 0.45, None],
+                "slope": [None, None, None, 0.05],
+            }
+        )
+
+        ds.write_static_attributes(df, tmp_path)
+
+        # Check all attribute type partitions exist
+        base_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
+        assert (base_path / "attribute_type=caravan" / "data.parquet").exists()
+        assert (base_path / "attribute_type=hydroatlas" / "data.parquet").exists()
+        assert (base_path / "attribute_type=topo" / "data.parquet").exists()
+
+        # Verify data separation
+        caravan_data = pl.read_parquet(base_path / "attribute_type=caravan" / "data.parquet")
+        hydroatlas_data = pl.read_parquet(base_path / "attribute_type=hydroatlas" / "data.parquet")
+        topo_data = pl.read_parquet(base_path / "attribute_type=topo" / "data.parquet")
+
+        assert len(caravan_data) == 2
+        assert len(hydroatlas_data) == 1
+        assert len(topo_data) == 1
+
+    def test_write_static_attributes_mixed_schemas(self, tmp_path):
+        """Test writing data with different schemas for different attribute types."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G001"],
+                "attribute_type": ["caravan", "hydroatlas"],
+                "area": [100.5, None],  # Only in caravan
+                "elevation": [500, None],  # Only in caravan
+                "forest_cover": [None, 0.45],  # Only in hydroatlas
+                "urban_area": [None, 0.10],  # Only in hydroatlas
+            }
+        )
+
+        ds.write_static_attributes(df, tmp_path)
+
+        # Read back and verify schemas
+        base_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
+        caravan_data = pl.read_parquet(base_path / "attribute_type=caravan" / "data.parquet")
+        hydroatlas_data = pl.read_parquet(base_path / "attribute_type=hydroatlas" / "data.parquet")
+
+        # Caravan should have area and elevation, but not forest_cover or urban_area
+        assert "area" in caravan_data.columns
+        assert "elevation" in caravan_data.columns
+        assert "forest_cover" in caravan_data.columns  # May be present as null
+        assert "urban_area" in caravan_data.columns  # May be present as null
+
+        # Hydroatlas should have forest_cover and urban_area
+        assert "forest_cover" in hydroatlas_data.columns
+        assert "urban_area" in hydroatlas_data.columns
+
+    def test_write_static_attributes_empty_dataframe(self, tmp_path):
+        """Test writing empty DataFrame."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Empty DataFrame with correct schema
+        df = pl.DataFrame(
+            {
+                "gauge_id": [],
+                "attribute_type": [],
+                "area": [],
+            }
+        ).cast({"gauge_id": pl.Utf8, "attribute_type": pl.Utf8, "area": pl.Float64})
+
+        ds.write_static_attributes(df, tmp_path)
+
+        # Should not crash - directory structure may or may not be created
+
+
+class TestWriteReadIntegration:
+    """Test integration between write and read methods (round-trip testing)."""
+
+    def test_timeseries_write_read_roundtrip(self, tmp_path):
+        """Test writing timeseries data and reading it back."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Create original data
+        original_df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G001", "G002", "G002"],
+                "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02"],
+                "streamflow": [10.5, 12.0, 15.2, 14.8],
+                "temperature": [5.0, 6.2, 4.8, 5.5],
+                "precipitation": [0.0, 2.5, 1.0, 0.5],
+            }
+        )
+
+        # Write data
+        ds.write_timeseries(original_df, tmp_path)
+
+        # Read data back using the CaravanDataSource
+        ds_read = CaravanDataSource(tmp_path, region="test_region")
+        read_df = ds_read.get_timeseries().collect()
+
+        # Sort both dataframes for comparison
+        original_sorted = original_df.sort(["gauge_id", "date"])
+        read_sorted = read_df.sort(["gauge_id", "date"])
+
+        # Compare core data (excluding hive partition columns added during read)
+        core_columns = ["gauge_id", "date", "streamflow", "temperature", "precipitation"]
+        for col in core_columns:
+            assert col in read_sorted.columns
+            if col == "date":
+                # Convert string dates back to date objects for comparison
+                original_dates = original_sorted[col].str.strptime(pl.Date, "%Y-%m-%d")
+                assert original_dates.equals(read_sorted[col])
+            else:
+                assert original_sorted[col].equals(read_sorted[col])
+
+    def test_static_attributes_write_read_roundtrip(self, tmp_path):
+        """Test writing static attributes and reading them back."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Create original data
+        original_df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G002", "G001", "G003"],
+                "attribute_type": ["caravan", "caravan", "hydroatlas", "topo"],
+                "area": [100.5, 250.3, None, None],
+                "elevation": [500, 750, None, None],
+                "forest_cover": [None, None, 0.45, None],
+                "slope": [None, None, None, 0.05],
+            }
+        )
+
+        # Write data
+        ds.write_static_attributes(original_df, tmp_path)
+
+        # Read data back using the CaravanDataSource
+        ds_read = CaravanDataSource(tmp_path, region="test_region")
+        read_df = ds_read.get_static_attributes().collect()
+
+        # Sort both dataframes for comparison
+        original_sorted = original_df.sort(["gauge_id", "attribute_type"])
+        read_sorted = read_df.sort(["gauge_id", "attribute_type"])
+
+        # Compare core data
+        assert len(original_sorted) == len(read_sorted)
+        assert set(original_sorted["gauge_id"]) == set(read_sorted["gauge_id"])
+        assert set(original_sorted["attribute_type"]) == set(read_sorted["attribute_type"])
+
+    def test_write_read_with_filters(self, tmp_path):
+        """Test writing data and reading with various filters."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Write timeseries data
+        ts_df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G001", "G002", "G002", "G003", "G003"],
+                "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02"],
+                "streamflow": [10.5, 12.0, 15.2, 14.8, 8.8, 9.2],
+                "temperature": [5.0, 6.2, 4.8, 5.5, 3.2, 4.1],
+            }
+        )
+        ds.write_timeseries(ts_df, tmp_path)
+
+        # Write attributes data
+        attr_df = pl.DataFrame(
+            {
+                "gauge_id": ["G001", "G002", "G003", "G001", "G002", "G003"],
+                "attribute_type": ["caravan", "caravan", "caravan", "hydroatlas", "hydroatlas", "hydroatlas"],
+                "area": [100.5, 250.3, 175.8, None, None, None],
+                "forest_cover": [None, None, None, 0.45, 0.62, 0.38],
+            }
+        )
+        ds.write_static_attributes(attr_df, tmp_path)
+
+        # Test reading with gauge filter
+        ds_read = CaravanDataSource(tmp_path, region="test_region")
+        filtered_ts = ds_read.get_timeseries(gauge_ids=["G001", "G003"]).collect()
+        filtered_attrs = ds_read.get_static_attributes(gauge_ids=["G001", "G003"]).collect()
+
+        assert set(filtered_ts["gauge_id"].unique()) == {"G001", "G003"}
+        assert set(filtered_attrs["gauge_id"].unique()) == {"G001", "G003"}
+        assert len(filtered_ts) == 4  # 2 gauges * 2 dates
+        assert len(filtered_attrs) == 4  # 2 gauges * 2 attribute types
+
+    def test_write_read_different_regions(self, tmp_path):
+        """Test writing to different regions and reading them separately."""
+        # Write data for region 1
+        ds1 = CaravanDataSource(tmp_path, region="region1")
+        df1 = pl.DataFrame(
+            {
+                "gauge_id": ["R1G001", "R1G002"],
+                "date": ["2020-01-01", "2020-01-01"],
+                "streamflow": [10.5, 12.0],
+            }
+        )
+        ds1.write_timeseries(df1, tmp_path)
+
+        # Write data for region 2
+        ds2 = CaravanDataSource(tmp_path, region="region2")
+        df2 = pl.DataFrame(
+            {
+                "gauge_id": ["R2G001", "R2G002"],
+                "date": ["2020-01-01", "2020-01-01"],
+                "streamflow": [15.5, 18.0],
+            }
+        )
+        ds2.write_timeseries(df2, tmp_path)
+
+        # Read from region 1 only
+        read_r1 = ds1.get_timeseries().collect()
+        assert set(read_r1["gauge_id"].unique()) == {"R1G001", "R1G002"}
+        assert read_r1["REGION_NAME"].unique()[0] == "region1"
+
+        # Read from region 2 only
+        read_r2 = ds2.get_timeseries().collect()
+        assert set(read_r2["gauge_id"].unique()) == {"R2G001", "R2G002"}
+        assert read_r2["REGION_NAME"].unique()[0] == "region2"
+
+        # Read from all regions
+        ds_all = CaravanDataSource(tmp_path)
+        read_all = ds_all.get_timeseries().collect()
+        all_gauges = {"R1G001", "R1G002", "R2G001", "R2G002"}
+        assert set(read_all["gauge_id"].unique()) == all_gauges
+        assert set(read_all["REGION_NAME"].unique()) == {"region1", "region2"}
+
+    def test_write_read_data_types_preservation(self, tmp_path):
+        """Test that data types are preserved during write/read cycle."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+
+        # Create data with specific types
+        original_df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+                "count": [42],
+                "flag": [True],
+            }
+        ).cast(
+            {
+                "gauge_id": pl.Utf8,
+                "date": pl.Utf8,
+                "streamflow": pl.Float64,
+                "count": pl.Int32,
+                "flag": pl.Boolean,
+            }
+        )
+
+        ds.write_timeseries(original_df, tmp_path)
+
+        # Read back and check types
+        ds_read = CaravanDataSource(tmp_path, region="test_region")
+        read_df = ds_read.get_timeseries().collect()
+
+        # Note: date gets converted to Date type during reading
+        assert read_df["streamflow"].dtype == pl.Float64
+        assert read_df["count"].dtype == pl.Int32
+        assert read_df["flag"].dtype == pl.Boolean
+        assert read_df["date"].dtype == pl.Date
+
+    def test_write_read_large_dataset_simulation(self, tmp_path):
+        """Test write/read with a larger simulated dataset."""
+        ds = CaravanDataSource(tmp_path, region="large_test")
+
+        # Create larger dataset
+        import random
+
+        gauge_ids = [f"G{i:03d}" for i in range(1, 11)]  # 10 gauges
+        dates = pd.date_range("2020-01-01", "2020-01-31", freq="D")  # 31 days
+
+        data = []
+        for gauge_id in gauge_ids:
+            for date_val in dates:
+                data.append(
+                    {
+                        "gauge_id": gauge_id,
+                        "date": date_val.strftime("%Y-%m-%d"),
+                        "streamflow": random.uniform(5.0, 20.0),
+                        "temperature": random.uniform(-5.0, 15.0),
+                    }
+                )
+
+        large_df = pl.DataFrame(data)
+
+        # Write data
+        ds.write_timeseries(large_df, tmp_path)
+
+        # Read back and verify
+        ds_read = CaravanDataSource(tmp_path, region="large_test")
+        read_df = ds_read.get_timeseries().collect()
+
+        assert len(read_df) == len(large_df)  # 10 gauges * 31 days = 310 rows
+        assert set(read_df["gauge_id"].unique()) == set(gauge_ids)
+        assert len(read_df["date"].unique()) == 31
+
+        # Test filtered reading
+        subset_gauges = ["G001", "G005", "G010"]
+        filtered_df = ds_read.get_timeseries(gauge_ids=subset_gauges).collect()
+        assert len(filtered_df) == 3 * 31  # 3 gauges * 31 days
+        assert set(filtered_df["gauge_id"].unique()) == set(subset_gauges)
