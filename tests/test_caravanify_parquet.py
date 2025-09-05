@@ -39,34 +39,24 @@ def temp_hive_data(tmp_path):
             # Note: gauge_id is a hive partition column and will be added automatically by polars
             df.write_parquet(ts_path / "data.parquet")
 
-    # Create attributes data with different schemas per attribute type
-    attribute_types = ["caravan", "hydroatlas"]
-
+    # Create merged attributes data (single file per region)
     for region in regions:
-        for attr_type in attribute_types:
-            attr_path = base_path / f"REGION_NAME={region}" / "data_type=attributes" / f"attribute_type={attr_type}"
-            attr_path.mkdir(parents=True)
+        attr_path = base_path / f"REGION_NAME={region}" / "data_type=attributes"
+        attr_path.mkdir(parents=True)
 
-            # Create different schemas for each attribute type
-            if attr_type == "caravan":
-                df = pl.DataFrame(
-                    {
-                        "gauge_id": gauge_ids[region],
-                        "area": [100.5, 250.3, 175.8] if region == "camels" else [320.1, 410.5],
-                        "elevation": [500, 750, 600] if region == "camels" else [1200, 950],
-                        "slope": [0.05, 0.12, 0.08] if region == "camels" else [0.15, 0.10],
-                    }
-                )
-            else:  # hydroatlas
-                df = pl.DataFrame(
-                    {
-                        "gauge_id": gauge_ids[region],
-                        "forest_cover": [0.45, 0.62, 0.38] if region == "camels" else [0.71, 0.55],
-                        "urban_area": [0.10, 0.05, 0.15] if region == "camels" else [0.02, 0.08],
-                    }
-                )
+        # Create merged attributes with all columns
+        df = pl.DataFrame(
+            {
+                "gauge_id": gauge_ids[region],
+                "area": [100.5, 250.3, 175.8] if region == "camels" else [320.1, 410.5],
+                "elevation": [500, 750, 600] if region == "camels" else [1200, 950],
+                "slope": [0.05, 0.12, 0.08] if region == "camels" else [0.15, 0.10],
+                "forest_cover": [0.45, 0.62, 0.38] if region == "camels" else [0.71, 0.55],
+                "urban_area": [0.10, 0.05, 0.15] if region == "camels" else [0.02, 0.08],
+            }
+        )
 
-            df.write_parquet(attr_path / "data.parquet")
+        df.write_parquet(attr_path / "data.parquet")
 
     return base_path
 
@@ -131,6 +121,7 @@ class TestCaravanDataSourceInit:
         assert ds.region is None
         assert "REGION_NAME=*" in ds._ts_glob
         assert "REGION_NAME=*" in ds._attr_glob
+        assert ds._attr_glob.endswith("data_type=attributes/data.parquet")
 
     def test_init_with_specific_region(self, temp_hive_data):
         """Test initialization with specific region."""
@@ -139,6 +130,7 @@ class TestCaravanDataSourceInit:
         assert ds.region == "camels"
         assert "REGION_NAME=camels" in ds._ts_glob
         assert "REGION_NAME=camels" in ds._attr_glob
+        assert ds._attr_glob.endswith("data_type=attributes/data.parquet")
 
     def test_init_with_string_path(self, temp_hive_data):
         """Test initialization with string path."""
@@ -275,7 +267,7 @@ class TestTimeseriesData:
         """Test filtering by variables."""
         ds = CaravanDataSource(temp_hive_data)
         variables = ["streamflow", "temperature"]
-        ts_data = ds.get_timeseries(variables=variables).collect()
+        ts_data = ds.get_timeseries(columns=variables).collect()
 
         assert len(ts_data) == 50
         assert set(ts_data.columns) == {"REGION_NAME", "gauge_id", "date", "streamflow", "temperature"}
@@ -299,7 +291,7 @@ class TestTimeseriesData:
         """Test multiple filters combined."""
         ds = CaravanDataSource(temp_hive_data, region="camels")
         ts_data = ds.get_timeseries(
-            gauge_ids=["G01013500"], variables=["streamflow"], date_range=("2020-01-01", "2020-01-03")
+            gauge_ids=["G01013500"], columns=["streamflow"], date_range=("2020-01-01", "2020-01-03")
         ).collect()
 
         assert len(ts_data) == 3
@@ -326,11 +318,16 @@ class TestStaticAttributes:
         ds = CaravanDataSource(temp_hive_data)
         attrs = ds.get_static_attributes().collect()
 
-        # 5 gauges * 2 attribute types = 10 rows
-        assert len(attrs) == 10
+        # 5 gauges total (3 camels + 2 hysets)
+        assert len(attrs) == 5
         assert "gauge_id" in attrs.columns
-        assert "attribute_type" in attrs.columns
         assert "REGION_NAME" in attrs.columns
+        # Check that all attribute columns are present
+        assert "area" in attrs.columns
+        assert "elevation" in attrs.columns
+        assert "slope" in attrs.columns
+        assert "forest_cover" in attrs.columns
+        assert "urban_area" in attrs.columns
 
     def test_get_static_attributes_with_gauge_filter(self, temp_hive_data):
         """Test filtering by gauge IDs."""
@@ -338,8 +335,8 @@ class TestStaticAttributes:
         gauge_ids = ["G01013500", "02LE024"]
         attrs = ds.get_static_attributes(gauge_ids=gauge_ids).collect()
 
-        # 2 gauges * 2 attribute types = 4 rows
-        assert len(attrs) == 4
+        # 2 gauges
+        assert len(attrs) == 2
         assert set(attrs["gauge_id"].unique()) == set(gauge_ids)
 
     def test_get_static_attributes_with_column_filter(self, temp_hive_data):
@@ -348,43 +345,26 @@ class TestStaticAttributes:
         columns = ["area", "elevation"]
         attrs = ds.get_static_attributes(columns=columns).collect()
 
-        # Only caravan type has these columns
+        # Selected columns should be present
         assert "area" in attrs.columns
         assert "elevation" in attrs.columns
+        # Non-selected columns should not be present
         assert "forest_cover" not in attrs.columns
         assert "urban_area" not in attrs.columns
 
-    def test_get_static_attributes_with_type_filter(self, temp_hive_data):
-        """Test filtering by attribute types."""
-        ds = CaravanDataSource(temp_hive_data)
-        attrs = ds.get_static_attributes(attribute_types=["hydroatlas"]).collect()
-
-        # 5 gauges * 1 attribute type = 5 rows
-        assert len(attrs) == 5
-        assert attrs["attribute_type"].unique()[0] == "hydroatlas"
-        assert "forest_cover" in attrs.columns
-        assert "urban_area" in attrs.columns
-        # Note: diagonal concatenation may include columns with nulls from other attribute types
-        # Check that caravan-specific columns are null for hydroatlas rows
-        if "area" in attrs.columns:
-            assert attrs["area"].is_null().all()
-        if "elevation" in attrs.columns:
-            assert attrs["elevation"].is_null().all()
-
-    def test_get_static_attributes_schema_differences(self, temp_hive_data):
-        """Test handling different schemas across files."""
+    def test_get_static_attributes_schema(self, temp_hive_data):
+        """Test that all attributes are in merged schema."""
         ds = CaravanDataSource(temp_hive_data)
         attrs = ds.get_static_attributes().collect()
 
-        # Should handle missing columns with nulls
-        assert len(attrs) == 10
+        # Should have 5 gauges
+        assert len(attrs) == 5
 
-        # Check that schema union worked (diagonal concatenation)
+        # Check that all columns are present in merged schema
         # Note: data_type is added by hive partitioning
-        all_columns = {
+        expected_columns = {
             "gauge_id",
             "REGION_NAME",
-            "attribute_type",
             "area",
             "elevation",
             "slope",
@@ -392,16 +372,11 @@ class TestStaticAttributes:
             "urban_area",
             "data_type",
         }
-        assert set(attrs.columns) == all_columns
+        assert set(attrs.columns) == expected_columns
 
-        # Check nulls are properly placed for missing columns
-        caravan_rows = attrs.filter(pl.col("attribute_type") == "caravan")
-        assert caravan_rows["forest_cover"].is_null().all()
-        assert caravan_rows["urban_area"].is_null().all()
-
-        hydroatlas_rows = attrs.filter(pl.col("attribute_type") == "hydroatlas")
-        assert hydroatlas_rows["area"].is_null().all()
-        assert hydroatlas_rows["elevation"].is_null().all()
+        # Check that no nulls exist (since data was merged)
+        for col in ["area", "elevation", "slope", "forest_cover", "urban_area"]:
+            assert attrs[col].null_count() == 0
 
     def test_get_static_attributes_empty_result(self, temp_hive_data):
         """Test handling empty results."""
@@ -473,7 +448,7 @@ class TestErrorHandling:
         ds = CaravanDataSource(temp_hive_data)
 
         # Should only return metadata columns when variable doesn't exist
-        ts_data = ds.get_timeseries(variables=["nonexistent"]).collect()
+        ts_data = ds.get_timeseries(columns=["nonexistent"]).collect()
         assert len(ts_data) == 50  # Still returns rows
         assert "nonexistent" not in ts_data.columns
         assert set(ts_data.columns) == {"REGION_NAME", "gauge_id", "date"}
@@ -502,7 +477,7 @@ class TestPartitionPruning:
 
         attrs = ds.get_static_attributes().collect()
         assert attrs["REGION_NAME"].unique()[0] == "camels"
-        assert len(attrs) == 6  # 3 gauges * 2 attribute types
+        assert len(attrs) == 3  # 3 gauges
 
     def test_gauge_partition_pruning_timeseries(self, temp_hive_data):
         """Test that gauge filter uses partition pruning for timeseries."""
@@ -514,55 +489,6 @@ class TestPartitionPruning:
 
         assert ts_data["gauge_id"].unique()[0] == "G01013500"
         assert len(ts_data) == 10  # 1 gauge * 10 days
-
-    def test_attribute_type_partition_pruning(self, temp_hive_data):
-        """Test that attribute type filter uses partition pruning."""
-        ds = CaravanDataSource(temp_hive_data)
-
-        # Should only read from specific attribute type partitions
-        attrs = ds.get_static_attributes(attribute_types=["caravan"]).collect()
-
-        assert attrs["attribute_type"].unique()[0] == "caravan"
-        assert len(attrs) == 5  # 5 gauges * 1 attribute type
-        assert "area" in attrs.columns
-        assert "forest_cover" not in attrs.columns or attrs["forest_cover"].is_null().all()
-
-    def test_get_static_attributes_with_unreadable_file(self, temp_hive_data, capfd):
-        """Test warning when a file can't be read."""
-        # Corrupt one of the parquet files
-        attr_file = list(temp_hive_data.glob("**/attribute_type=*/data.parquet"))[0]
-        attr_file.write_text("corrupted")
-
-        ds = CaravanDataSource(temp_hive_data)
-        attrs = ds.get_static_attributes().collect()
-
-        # Should still return data from readable files
-        assert len(attrs) > 0
-
-        # Should print warning
-        captured = capfd.readouterr()
-        assert "Warning: Could not read" in captured.out
-
-    def test_completely_disjoint_schemas(self, tmp_path):
-        """Test handling completely different schemas between files."""
-        base_path = tmp_path / "disjoint"
-
-        # Create files with no overlapping columns except gauge_id
-        path1 = base_path / "REGION_NAME=r1" / "data_type=attributes" / "attribute_type=t1"
-        path1.mkdir(parents=True)
-        pl.DataFrame({"gauge_id": ["g1"], "col_a": [1]}).write_parquet(path1 / "data.parquet")
-
-        path2 = base_path / "REGION_NAME=r2" / "data_type=attributes" / "attribute_type=t2"
-        path2.mkdir(parents=True)
-        pl.DataFrame({"gauge_id": ["g2"], "col_b": [2]}).write_parquet(path2 / "data.parquet")
-
-        ds = CaravanDataSource(base_path)
-        attrs = ds.get_static_attributes().collect()
-
-        # Should handle with nulls
-        assert set(attrs.columns) >= {"gauge_id", "col_a", "col_b"}
-        assert attrs.filter(pl.col("gauge_id") == "g1")["col_b"].is_null().all()
-        assert attrs.filter(pl.col("gauge_id") == "g2")["col_a"].is_null().all()
 
     def test_date_range_boundary_conditions(self, temp_hive_data):
         """Test date range with exact boundaries."""
@@ -780,10 +706,9 @@ class TestWriteStaticAttributes:
         df = pl.DataFrame(
             {
                 "gauge_id": ["G001", "G002", "G003"],
-                "attribute_type": ["caravan", "caravan", "hydroatlas"],
-                "area": [100.5, 250.3, None],
-                "elevation": [500, 750, None],
-                "forest_cover": [None, None, 0.45],
+                "area": [100.5, 250.3, 175.8],
+                "elevation": [500, 750, 600],
+                "forest_cover": [0.45, 0.62, 0.38],
             }
         )
 
@@ -793,20 +718,18 @@ class TestWriteStaticAttributes:
         expected_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
         assert expected_path.exists()
 
-        # Check attribute type partitions
-        caravan_path = expected_path / "attribute_type=caravan" / "data.parquet"
-        hydroatlas_path = expected_path / "attribute_type=hydroatlas" / "data.parquet"
-        assert caravan_path.exists()
-        assert hydroatlas_path.exists()
+        # Check that single merged file exists
+        data_path = expected_path / "data.parquet"
+        assert data_path.exists()
 
         # Verify data can be read back
-        caravan_data = pl.read_parquet(caravan_path)
-        hydroatlas_data = pl.read_parquet(hydroatlas_path)
+        data = pl.read_parquet(data_path)
 
-        assert len(caravan_data) == 2
-        assert len(hydroatlas_data) == 1
-        assert "attribute_type" not in caravan_data.columns  # Should be removed as it's in partition
-        assert "attribute_type" not in hydroatlas_data.columns
+        assert len(data) == 3
+        assert set(data["gauge_id"]) == {"G001", "G002", "G003"}
+        assert "area" in data.columns
+        assert "elevation" in data.columns
+        assert "forest_cover" in data.columns
 
     def test_write_static_attributes_with_lazyframe(self, tmp_path):
         """Test writing with LazyFrame input."""
@@ -815,7 +738,6 @@ class TestWriteStaticAttributes:
         df = pl.DataFrame(
             {
                 "gauge_id": ["G001"],
-                "attribute_type": ["caravan"],
                 "area": [100.5],
             }
         ).lazy()
@@ -823,9 +745,7 @@ class TestWriteStaticAttributes:
         ds.write_static_attributes(df, tmp_path)
 
         # Verify data was written
-        expected_file = (
-            tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "attribute_type=caravan" / "data.parquet"
-        )
+        expected_file = tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "data.parquet"
         assert expected_file.exists()
 
     def test_write_static_attributes_no_region_error(self, tmp_path):
@@ -835,7 +755,6 @@ class TestWriteStaticAttributes:
         df = pl.DataFrame(
             {
                 "gauge_id": ["G001"],
-                "attribute_type": ["caravan"],
                 "area": [100.5],
             }
         )
@@ -849,7 +768,6 @@ class TestWriteStaticAttributes:
 
         df = pl.DataFrame(
             {
-                "attribute_type": ["caravan"],
                 "area": [100.5],
             }
         )
@@ -857,28 +775,13 @@ class TestWriteStaticAttributes:
         with pytest.raises(ValueError, match="DataFrame must contain 'gauge_id' column"):
             ds.write_static_attributes(df, tmp_path)
 
-    def test_write_static_attributes_missing_attribute_type_error(self, tmp_path):
-        """Test that missing attribute_type column raises error."""
-        ds = CaravanDataSource(tmp_path, region="test_region")
-
-        df = pl.DataFrame(
-            {
-                "gauge_id": ["G001"],
-                "area": [100.5],
-            }
-        )
-
-        with pytest.raises(ValueError, match="DataFrame must contain 'attribute_type' column"):
-            ds.write_static_attributes(df, tmp_path)
-
     def test_write_static_attributes_overwrite_false_error(self, tmp_path):
-        """Test that existing partitions raise error when overwrite=False."""
+        """Test that existing file raises error when overwrite=False."""
         ds = CaravanDataSource(tmp_path, region="test_region")
 
         df = pl.DataFrame(
             {
                 "gauge_id": ["G001"],
-                "attribute_type": ["caravan"],
                 "area": [100.5],
             }
         )
@@ -887,7 +790,7 @@ class TestWriteStaticAttributes:
         ds.write_static_attributes(df, tmp_path)
 
         # Second write should fail with overwrite=False
-        with pytest.raises(ValueError, match="Attribute type partitions already exist"):
+        with pytest.raises(ValueError, match="Attributes file already exists"):
             ds.write_static_attributes(df, tmp_path, overwrite=False)
 
     def test_write_static_attributes_overwrite_true_success(self, tmp_path):
@@ -898,7 +801,6 @@ class TestWriteStaticAttributes:
         df1 = pl.DataFrame(
             {
                 "gauge_id": ["G001"],
-                "attribute_type": ["caravan"],
                 "area": [100.5],
             }
         )
@@ -908,81 +810,15 @@ class TestWriteStaticAttributes:
         df2 = pl.DataFrame(
             {
                 "gauge_id": ["G001"],
-                "attribute_type": ["caravan"],
                 "area": [999.9],
             }
         )
         ds.write_static_attributes(df2, tmp_path, overwrite=True)
 
         # Verify new data was written
-        written_file = (
-            tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "attribute_type=caravan" / "data.parquet"
-        )
+        written_file = tmp_path / "REGION_NAME=test_region" / "data_type=attributes" / "data.parquet"
         data = pl.read_parquet(written_file)
         assert data["area"][0] == 999.9
-
-    def test_write_static_attributes_multiple_types(self, tmp_path):
-        """Test writing data for multiple attribute types creates separate partitions."""
-        ds = CaravanDataSource(tmp_path, region="test_region")
-
-        df = pl.DataFrame(
-            {
-                "gauge_id": ["G001", "G002", "G001", "G003"],
-                "attribute_type": ["caravan", "caravan", "hydroatlas", "topo"],
-                "area": [100.5, 250.3, None, None],
-                "forest_cover": [None, None, 0.45, None],
-                "slope": [None, None, None, 0.05],
-            }
-        )
-
-        ds.write_static_attributes(df, tmp_path)
-
-        # Check all attribute type partitions exist
-        base_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
-        assert (base_path / "attribute_type=caravan" / "data.parquet").exists()
-        assert (base_path / "attribute_type=hydroatlas" / "data.parquet").exists()
-        assert (base_path / "attribute_type=topo" / "data.parquet").exists()
-
-        # Verify data separation
-        caravan_data = pl.read_parquet(base_path / "attribute_type=caravan" / "data.parquet")
-        hydroatlas_data = pl.read_parquet(base_path / "attribute_type=hydroatlas" / "data.parquet")
-        topo_data = pl.read_parquet(base_path / "attribute_type=topo" / "data.parquet")
-
-        assert len(caravan_data) == 2
-        assert len(hydroatlas_data) == 1
-        assert len(topo_data) == 1
-
-    def test_write_static_attributes_mixed_schemas(self, tmp_path):
-        """Test writing data with different schemas for different attribute types."""
-        ds = CaravanDataSource(tmp_path, region="test_region")
-
-        df = pl.DataFrame(
-            {
-                "gauge_id": ["G001", "G001"],
-                "attribute_type": ["caravan", "hydroatlas"],
-                "area": [100.5, None],  # Only in caravan
-                "elevation": [500, None],  # Only in caravan
-                "forest_cover": [None, 0.45],  # Only in hydroatlas
-                "urban_area": [None, 0.10],  # Only in hydroatlas
-            }
-        )
-
-        ds.write_static_attributes(df, tmp_path)
-
-        # Read back and verify schemas
-        base_path = tmp_path / "REGION_NAME=test_region" / "data_type=attributes"
-        caravan_data = pl.read_parquet(base_path / "attribute_type=caravan" / "data.parquet")
-        hydroatlas_data = pl.read_parquet(base_path / "attribute_type=hydroatlas" / "data.parquet")
-
-        # Caravan should have area and elevation, but not forest_cover or urban_area
-        assert "area" in caravan_data.columns
-        assert "elevation" in caravan_data.columns
-        assert "forest_cover" in caravan_data.columns  # May be present as null
-        assert "urban_area" in caravan_data.columns  # May be present as null
-
-        # Hydroatlas should have forest_cover and urban_area
-        assert "forest_cover" in hydroatlas_data.columns
-        assert "urban_area" in hydroatlas_data.columns
 
     def test_write_static_attributes_empty_dataframe(self, tmp_path):
         """Test writing empty DataFrame."""
@@ -992,10 +828,9 @@ class TestWriteStaticAttributes:
         df = pl.DataFrame(
             {
                 "gauge_id": [],
-                "attribute_type": [],
                 "area": [],
             }
-        ).cast({"gauge_id": pl.Utf8, "attribute_type": pl.Utf8, "area": pl.Float64})
+        ).cast({"gauge_id": pl.Utf8, "area": pl.Float64})
 
         ds.write_static_attributes(df, tmp_path)
 
@@ -1049,12 +884,11 @@ class TestWriteReadIntegration:
         # Create original data
         original_df = pl.DataFrame(
             {
-                "gauge_id": ["G001", "G002", "G001", "G003"],
-                "attribute_type": ["caravan", "caravan", "hydroatlas", "topo"],
-                "area": [100.5, 250.3, None, None],
-                "elevation": [500, 750, None, None],
-                "forest_cover": [None, None, 0.45, None],
-                "slope": [None, None, None, 0.05],
+                "gauge_id": ["G001", "G002", "G003"],
+                "area": [100.5, 250.3, 175.8],
+                "elevation": [500, 750, 600],
+                "forest_cover": [0.45, 0.62, 0.38],
+                "slope": [0.05, 0.12, 0.08],
             }
         )
 
@@ -1066,13 +900,16 @@ class TestWriteReadIntegration:
         read_df = ds_read.get_static_attributes().collect()
 
         # Sort both dataframes for comparison
-        original_sorted = original_df.sort(["gauge_id", "attribute_type"])
-        read_sorted = read_df.sort(["gauge_id", "attribute_type"])
+        original_sorted = original_df.sort(["gauge_id"])
+        read_sorted = read_df.sort(["gauge_id"])
 
         # Compare core data
         assert len(original_sorted) == len(read_sorted)
         assert set(original_sorted["gauge_id"]) == set(read_sorted["gauge_id"])
-        assert set(original_sorted["attribute_type"]) == set(read_sorted["attribute_type"])
+
+        # Check that all attribute columns match
+        for col in ["area", "elevation", "forest_cover", "slope"]:
+            assert original_sorted[col].equals(read_sorted[col])
 
     def test_write_read_with_filters(self, tmp_path):
         """Test writing data and reading with various filters."""
@@ -1092,10 +929,9 @@ class TestWriteReadIntegration:
         # Write attributes data
         attr_df = pl.DataFrame(
             {
-                "gauge_id": ["G001", "G002", "G003", "G001", "G002", "G003"],
-                "attribute_type": ["caravan", "caravan", "caravan", "hydroatlas", "hydroatlas", "hydroatlas"],
-                "area": [100.5, 250.3, 175.8, None, None, None],
-                "forest_cover": [None, None, None, 0.45, 0.62, 0.38],
+                "gauge_id": ["G001", "G002", "G003"],
+                "area": [100.5, 250.3, 175.8],
+                "forest_cover": [0.45, 0.62, 0.38],
             }
         )
         ds.write_static_attributes(attr_df, tmp_path)
@@ -1108,7 +944,7 @@ class TestWriteReadIntegration:
         assert set(filtered_ts["gauge_id"].unique()) == {"G001", "G003"}
         assert set(filtered_attrs["gauge_id"].unique()) == {"G001", "G003"}
         assert len(filtered_ts) == 4  # 2 gauges * 2 dates
-        assert len(filtered_attrs) == 4  # 2 gauges * 2 attribute types
+        assert len(filtered_attrs) == 2  # 2 gauges
 
     def test_write_read_different_regions(self, tmp_path):
         """Test writing to different regions and reading them separately."""
@@ -1285,7 +1121,7 @@ class TestToTimeSeriesCollection:
         ds = CaravanDataSource(temp_hive_data)
 
         # Get only streamflow and temperature
-        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow", "temperature"])
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], columns=["streamflow", "temperature"])
         collection = ds.to_time_series_collection(lf)
 
         assert collection.get_n_features() == 2
@@ -1382,8 +1218,8 @@ class TestToTimeSeriesCollection:
 
         # Create a LazyFrame manually with inconsistent feature counts
         # This creates data where one gauge has more features than another
-        df1 = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow", "temperature"]).collect()
-        df2 = ds.get_timeseries(gauge_ids=["G01030500"], variables=["streamflow"]).collect()
+        df1 = ds.get_timeseries(gauge_ids=["G01013500"], columns=["streamflow", "temperature"]).collect()
+        df2 = ds.get_timeseries(gauge_ids=["G01030500"], columns=["streamflow"]).collect()
 
         # Manually create feature data with different shapes for testing
         # Add a fake extra feature for the first gauge only
@@ -1419,15 +1255,18 @@ class TestToTimeSeriesCollection:
         # gauge2 has 3 features but feature_names only declares 2
         with pytest.raises(ValueError, match="has 3 features, expected 2"):
             TimeSeriesCollection(
-                tensors=tensors, feature_names=feature_names, date_ranges=date_ranges,
-                group_identifiers=group_identifiers, validate=True
+                tensors=tensors,
+                feature_names=feature_names,
+                date_ranges=date_ranges,
+                group_identifiers=group_identifiers,
+                validate=True,
             )
 
     def test_tensor_data_types_and_values(self, temp_hive_data):
         """Test that tensors have correct data types and values."""
         ds = CaravanDataSource(temp_hive_data)
 
-        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow"])
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], columns=["streamflow"])
         collection = ds.to_time_series_collection(lf)
 
         series = collection.get_group_series("G01013500", 0, 10)
@@ -1559,7 +1398,7 @@ class TestToTimeSeriesCollection:
         ds = CaravanDataSource(temp_hive_data)
 
         # Get data with specific column ordering
-        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["temperature", "streamflow"])
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], columns=["temperature", "streamflow"])
         collection = ds.to_time_series_collection(lf)
 
         # The order should match whatever Polars returns after filtering
@@ -1590,7 +1429,6 @@ class TestToStaticAttributeCollection:
                 "attr_b": [4.0, 5.0, 6.0],
                 "attr_c": [7.0, 8.0, 9.0],
                 "REGION_NAME": ["test", "test", "test"],
-                "attribute_type": ["caravan", "caravan", "caravan"],
                 "data_type": ["attributes", "attributes", "attributes"],
             }
         )
@@ -1651,7 +1489,6 @@ class TestToStaticAttributeCollection:
             {
                 "gauge_id": ["gauge1", "gauge2"],
                 "REGION_NAME": ["test", "test"],
-                "attribute_type": ["caravan", "caravan"],
                 "data_type": ["attributes", "attributes"],
             }
         )

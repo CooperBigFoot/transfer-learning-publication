@@ -31,9 +31,8 @@ class CaravanDataSource:
         region_pattern = f"REGION_NAME={region}" if region else "REGION_NAME=*"
 
         self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
-        self._attr_glob = str(
-            self.base_path / region_pattern / "data_type=attributes" / "attribute_type=*" / "data.parquet"
-        )
+        # Attributes are now in a single merged file
+        self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
 
         # For shapefiles, we need a slightly different approach
         self._shapefile_pattern = self.base_path / region_pattern / "data_type=shapefiles"
@@ -89,39 +88,24 @@ class CaravanDataSource:
             # Return empty list if no files found
             return []
 
-    def list_static_attributes(self, attribute_types: list[str] | None = None) -> list[str]:
+    def list_static_attributes(self) -> list[str]:
         """
         List all available static attributes using schema inspection.
-
-        Args:
-            attribute_types: Optional list of attribute types to include
-                           (e.g., ['caravan', 'hydroatlas'])
 
         Returns:
             List of attribute column names
         """
-        # First get all parquet files to union their schemas
-        from glob import glob
+        try:
+            lf = pl.scan_parquet(self._attr_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
+            schema = lf.collect_schema()
 
-        files = glob(self._attr_glob)
-
-        if not files:
+            # Exclude partition columns and gauge_id
+            exclude_cols = {"REGION_NAME", "data_type", "gauge_id"}
+            attributes = [col for col in schema if col not in exclude_cols]
+            return sorted(attributes)
+        except Exception:
+            # Return empty list if no files found
             return []
-
-        # Collect all unique columns from all files
-        all_columns = set()
-        for file in files:
-            try:
-                lf = pl.scan_parquet(file, hive_partitioning=True, n_rows=0)
-                schema = lf.collect_schema()
-                all_columns.update(schema.names())
-            except Exception:
-                continue
-
-        # Exclude partition columns and gauge_id
-        exclude_cols = {"REGION_NAME", "attribute_type", "data_type", "gauge_id"}
-        attributes = [col for col in all_columns if col not in exclude_cols]
-        return sorted(attributes)
 
     def get_date_ranges(self, gauge_ids: list[str] | None = None) -> pl.LazyFrame:
         """
@@ -154,7 +138,7 @@ class CaravanDataSource:
     def get_timeseries(
         self,
         gauge_ids: list[str] | None = None,
-        variables: list[str] | None = None,
+        columns: list[str] | None = None,
         date_range: tuple[str, str] | None = None,
     ) -> pl.LazyFrame:
         """
@@ -162,7 +146,7 @@ class CaravanDataSource:
 
         Args:
             gauge_ids: Optional list of gauge IDs to filter (uses partition pruning)
-            variables: Optional list of variables to select
+            columns: Optional list of columns to select
             date_range: Optional tuple of (start_date, end_date) as strings
 
         Returns:
@@ -191,9 +175,9 @@ class CaravanDataSource:
                 )
             )
 
-        if variables:
-            # Keep metadata columns plus requested variables
-            keep_cols = {"REGION_NAME", "gauge_id", "date"} | set(variables)
+        if columns:
+            # Keep metadata columns plus requested columns
+            keep_cols = {"REGION_NAME", "gauge_id", "date"} | set(columns)
             available_cols = set(lf.collect_schema().names())
             cols_to_select = list(keep_cols & available_cols)
             lf = lf.select(cols_to_select)
@@ -204,7 +188,6 @@ class CaravanDataSource:
         self,
         gauge_ids: list[str] | None = None,
         columns: list[str] | None = None,
-        attribute_types: list[str] | None = None,
     ) -> pl.LazyFrame:
         """
         Get static attributes as a LazyFrame.
@@ -212,23 +195,20 @@ class CaravanDataSource:
         Args:
             gauge_ids: Optional list of gauge IDs to filter
             columns: Optional list of attribute columns to select
-            attribute_types: Optional list of attribute types (e.g., ['caravan', 'hydroatlas'])
 
         Returns:
-            LazyFrame with static attributes (long format by default)
+            LazyFrame with static attributes
         """
+        # Check if files exist first
         from glob import glob
 
-        # Get list of files that match the pattern
         files = glob(self._attr_glob)
-
         if not files:
             # Return empty LazyFrame with expected schema when no files found
             empty_df = pl.DataFrame(
                 {
                     "REGION_NAME": pl.Series([], dtype=pl.Utf8),
                     "gauge_id": pl.Series([], dtype=pl.Utf8),
-                    "attribute_type": pl.Series([], dtype=pl.Utf8),
                 }
             )
             if columns:
@@ -236,66 +216,21 @@ class CaravanDataSource:
                     empty_df = empty_df.with_columns(pl.lit(None).alias(col))
             return empty_df.lazy()
 
-        # Read each file separately and union them
-        # This approach handles schema differences better
-        lazy_frames = []
+        lf = pl.scan_parquet(self._attr_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
-        for file in files:
-            try:
-                # Scan with hive partitioning to get partition columns
-                lf = pl.scan_parquet(file, hive_partitioning=True, rechunk=False, low_memory=True)
+        # Apply gauge filter if needed
+        if gauge_ids:
+            lf = lf.filter(pl.col("gauge_id").is_in(gauge_ids))
 
-                # Force early validation by checking schema - this will fail for corrupted files
-                _ = lf.collect_schema()
+        # Select columns if specified
+        if columns:
+            # Keep metadata columns plus requested attributes
+            keep_cols = {"REGION_NAME", "gauge_id"} | set(columns)
+            available_cols = set(lf.collect_schema().names())
+            cols_to_select = list(keep_cols & available_cols)
+            lf = lf.select(cols_to_select)
 
-                # Apply attribute_type filter if needed
-                if attribute_types and "attribute_type" in lf.collect_schema().names():
-                    lf = lf.filter(pl.col("attribute_type").is_in(attribute_types))
-
-                # Apply gauge filter if needed
-                if gauge_ids:
-                    lf = lf.filter(pl.col("gauge_id").is_in(gauge_ids))
-
-                # Select columns if specified
-                if columns:
-                    # Keep metadata columns plus requested attributes
-                    keep_cols = {"REGION_NAME", "gauge_id", "attribute_type"} | set(columns)
-                    available_cols = set(lf.collect_schema().names())
-                    cols_to_select = list(keep_cols & available_cols)
-
-                    # Only add if we have columns beyond just metadata
-                    if len(cols_to_select) > 3 or not columns:
-                        lf = lf.select(cols_to_select)
-                        lazy_frames.append(lf)
-                else:
-                    lazy_frames.append(lf)
-
-            except Exception as e:
-                # Skip files that can't be read
-                print(f"Warning: Could not read {file}: {e}")
-                continue
-
-        if not lazy_frames:
-            # Return empty LazyFrame with expected schema if no valid files were read
-            empty_df = pl.DataFrame(
-                {
-                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
-                    "gauge_id": pl.Series([], dtype=pl.Utf8),
-                    "attribute_type": pl.Series([], dtype=pl.Utf8),
-                }
-            )
-            if columns:
-                for col in columns:
-                    empty_df = empty_df.with_columns(pl.lit(None).alias(col))
-            return empty_df.lazy()
-
-        # Union all frames, handling different schemas
-        result = lazy_frames[0]
-        for lf in lazy_frames[1:]:
-            # Use diagonal concatenation to handle different schemas
-            result = pl.concat([result, lf], how="diagonal_relaxed")
-
-        return result
+        return lf
 
     def get_geometries(self, gauge_ids: list[str] | None = None) -> gpd.GeoDataFrame:
         """
@@ -423,17 +358,17 @@ class CaravanDataSource:
         self, df: pl.DataFrame | pl.LazyFrame, output_base_path: str | Path, overwrite: bool = False
     ) -> None:
         """
-        Write static attributes to hive-partitioned parquet files.
+        Write static attributes to hive-partitioned parquet file.
 
-        Creates structure: REGION_NAME={region}/data_type=attributes/attribute_type={type}/data.parquet
+        Creates structure: REGION_NAME={region}/data_type=attributes/data.parquet
 
         Args:
-            df: DataFrame or LazyFrame with attributes. Must contain 'gauge_id' and 'attribute_type' columns.
+            df: DataFrame or LazyFrame with attributes. Must contain 'gauge_id' column.
             output_base_path: Root directory for output
-            overwrite: If False, raise error if attribute type partitions exist. If True, overwrite.
+            overwrite: If False, raise error if file exists. If True, overwrite.
 
         Raises:
-            ValueError: If region not set, required columns missing, or existing data when overwrite=False
+            ValueError: If region not set, gauge_id column missing, or existing data when overwrite=False
         """
         import logging
 
@@ -453,45 +388,29 @@ class CaravanDataSource:
         # Validate required columns
         if "gauge_id" not in df.columns:
             raise ValueError("DataFrame must contain 'gauge_id' column")
-        if "attribute_type" not in df.columns:
-            raise ValueError("DataFrame must contain 'attribute_type' column for partitioning")
 
         # Build output path
         output_path = Path(output_base_path) / f"REGION_NAME={self.region}" / "data_type=attributes"
+        output_file = output_path / "data.parquet"
 
-        # Get unique attribute types
-        unique_types = df["attribute_type"].unique().to_list()
-        existing_types = []
+        # Check for existing file
+        if output_file.exists():
+            if not overwrite:
+                raise ValueError(
+                    f"Attributes file already exists: {output_file}\nSet overwrite=True to replace existing data."
+                )
+            else:
+                logger.warning(f"Overwriting existing attributes file: {output_file}")
 
-        # Check for existing attribute type partitions
-        if output_path.exists():
-            for attr_type in unique_types:
-                type_path = output_path / f"attribute_type={attr_type}"
-                if type_path.exists():
-                    existing_types.append(str(attr_type))
+        # Create directory if needed
+        output_path.mkdir(parents=True, exist_ok=True)
 
-            if existing_types:
-                if not overwrite:
-                    raise ValueError(
-                        f"Attribute type partitions already exist: {', '.join(existing_types)}"
-                        "\nSet overwrite=True to replace existing data."
-                    )
-                else:
-                    logger.warning(f"Overwriting existing attribute type(s): {', '.join(existing_types)}")
-
-        # Write each attribute_type to its own partition with data.parquet filename
-        # Group by attribute_type and write each group separately
-        for attr_type in unique_types:
-            type_df = df.filter(pl.col("attribute_type") == attr_type)
-            type_path = output_path / f"attribute_type={attr_type}"
-            type_path.mkdir(parents=True, exist_ok=True)
-
-            # Remove the attribute_type column since it's in the partition path
-            type_df = type_df.drop("attribute_type")
-            type_df.write_parquet(type_path / "data.parquet", use_pyarrow=True, statistics=True)
+        # Write the dataframe directly
+        df.write_parquet(output_file, use_pyarrow=True, statistics=True)
 
         n_gauges = df["gauge_id"].n_unique()
-        logger.info(f"Wrote {len(unique_types)} attribute type(s) for {n_gauges} gauges to {output_path}")
+        n_attributes = len([col for col in df.columns if col != "gauge_id"])
+        logger.info(f"Wrote {n_gauges} gauges with {n_attributes} attributes to {output_file}")
 
     def to_time_series_collection(self, lf: pl.LazyFrame) -> TimeSeriesCollection:
         """
@@ -635,7 +554,7 @@ class CaravanDataSource:
         Expects LazyFrame from get_static_attributes() with columns:
         - 'gauge_id': Group identifier (string)
         - attribute columns: All numeric attribute columns
-        - 'REGION_NAME', 'attribute_type', 'data_type': Optional metadata (ignored)
+        - 'REGION_NAME', 'data_type': Optional metadata (ignored)
 
         Args:
             lf: LazyFrame from get_static_attributes()
@@ -657,33 +576,11 @@ class CaravanDataSource:
             raise ValueError("Missing required column: gauge_id")
 
         # Auto-detect attribute columns (exclude metadata)
-        metadata_columns = {"gauge_id", "REGION_NAME", "attribute_type", "data_type"}
+        metadata_columns = {"gauge_id", "REGION_NAME", "data_type"}
         attribute_columns = [col for col in df.columns if col not in metadata_columns]
 
         if not attribute_columns:
             raise ValueError("No attribute columns found after excluding metadata")
-
-        # Handle potential long format data - pivot if needed
-        # Check if we have multiple rows per gauge (indicating long format)
-        gauge_counts = df.group_by("gauge_id").len()
-        max_count = gauge_counts["len"].max() if len(gauge_counts) > 0 else 0
-
-        if max_count > 1:
-            # Long format detected - need to pivot to wide format
-            # This handles cases where attributes come from different attribute_types
-            if "attribute_type" not in df.columns:
-                raise ValueError(
-                    "Multiple rows per gauge detected but no 'attribute_type' column found. "
-                    "This indicates an upstream processing error."
-                )
-
-            # Get a single representative row per gauge to check structure
-            first_rows = df.group_by("gauge_id").first()
-            if len(first_rows) != df["gauge_id"].n_unique():
-                raise ValueError("Inconsistent data structure - cannot reliably pivot to wide format")
-
-            # Use the first row as our base and assume all attribute columns are present
-            df = first_rows
 
         # Validate data types of attribute columns
         for col in attribute_columns:
@@ -715,7 +612,7 @@ class CaravanDataSource:
             # Filter data for this gauge
             gauge_df = df.filter(pl.col("gauge_id") == gauge_id)
 
-            # Should be exactly one row per gauge after handling long format
+            # Should be exactly one row per gauge since we have merged attributes
             if len(gauge_df) != 1:
                 raise ValueError(
                     f"Gauge '{gauge_id}' has {len(gauge_df)} rows, expected 1. "

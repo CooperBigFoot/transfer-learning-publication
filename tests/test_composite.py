@@ -346,7 +346,7 @@ class TestCompositePipelineJoblib:
             assert isinstance(loaded_pipeline, CompositePipeline)
             assert loaded_pipeline.group_identifier == single_step_pipeline.group_identifier
             assert len(loaded_pipeline.steps) == len(single_step_pipeline.steps)
-            assert loaded_pipeline._is_fitted == single_step_pipeline._is_fitted == False
+            assert loaded_pipeline._is_fitted == single_step_pipeline._is_fitted is False
             assert len(loaded_pipeline._fitted_steps) == len(single_step_pipeline._fitted_steps) == 0
             assert loaded_pipeline._group_mapping == single_step_pipeline._group_mapping == {}
 

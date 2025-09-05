@@ -56,8 +56,7 @@ class TimeSeriesCollection:
             )
         if len(self._tensors) != len(self._date_ranges):
             raise ValueError(
-                f"Number of tensors ({len(self._tensors)}) must match number of date ranges "
-                f"({len(self._date_ranges)})"
+                f"Number of tensors ({len(self._tensors)}) must match number of date ranges ({len(self._date_ranges)})"
             )
 
         # Build index mappings

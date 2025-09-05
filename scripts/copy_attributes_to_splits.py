@@ -15,9 +15,7 @@ logging.basicConfig(
 )
 
 
-def copy_attributes_to_splits(
-    raw_data_path: str, clean_data_path: str, regions: list[str], splits: list[str] = ["train", "val", "test"]
-):
+def copy_attributes_to_splits(raw_data_path: str, clean_data_path: str, regions: list[str], splits: list[str] = None):
     """
     Copy static attributes from raw data to all train/val/test splits.
 
@@ -28,6 +26,8 @@ def copy_attributes_to_splits(
         splits: List of split names (default: train, val, test)
     """
 
+    if splits is None:
+        splits = ["train", "val", "test"]
     for region in regions:
         logging.info(f"Processing attributes for region: {region}")
 

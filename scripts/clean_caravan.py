@@ -30,7 +30,7 @@ def clean_caravan_data(base_path: str, output_path: str, region: str, variables:
 
     for i, gauge_id in enumerate(gauge_ids, 1):
         try:
-            lf = caravan.get_timeseries(gauge_ids=[gauge_id], variables=variables)
+            lf = caravan.get_timeseries(gauge_ids=[gauge_id], columns=variables)
 
             lf_clean = cleaner.apply(lf)
 
