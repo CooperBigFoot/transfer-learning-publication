@@ -19,7 +19,7 @@ class Sample:
         y: Target values to predict. Shape: (output_length,) or (output_length, 1)
            Contains only the target variable values for the prediction window.
 
-        static: Time-invariant features for this groupd. Shape: (n_static_features,)
+        static: Time-invariant features for this group. Shape: (n_static_features,)
                 Examples: catchment area, elevation, soil type
 
         future: Known future covariates. Shape: (output_length, n_future_features)
@@ -37,8 +37,8 @@ class Sample:
     X: torch.Tensor
     y: torch.Tensor
     static: torch.Tensor
-    future: torch.Tensor | None
-    groupd_identifier: str
+    future: torch.Tensor
+    group_identifier: str
     input_end_date: int | None = None
 
     def __post_init__(self):
@@ -61,8 +61,8 @@ class Sample:
         if self.static.ndim != 1:
             raise ValueError(f"static must be 1D, got shape {self.static.shape}")
 
-        if self.future is not None and self.future.ndim != 2:
+        if self.future.ndim != 2:
             raise ValueError(f"future must be 2D (time, features), got shape {self.future.shape}")
 
-        if self.future is not None and self.future.shape[0] != self.y.shape[0]:
+        if self.future.shape[0] != self.y.shape[0]:
             raise ValueError(f"future length ({self.future.shape[0]}) must match output length ({self.y.shape[0]})")

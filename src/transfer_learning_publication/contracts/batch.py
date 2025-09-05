@@ -32,7 +32,7 @@ class Batch:
     X: torch.Tensor
     y: torch.Tensor
     static: torch.Tensor
-    future: torch.Tensor | None
+    future: torch.Tensor
     group_identifiers: list[str]
     input_end_dates: torch.Tensor | None = None
 
@@ -64,7 +64,7 @@ class Batch:
     @property
     def n_future_features(self) -> int:
         """Get the number of future features."""
-        return self.future.shape[2] if self.future.shape[2] > 0 else 0
+        return self.future.shape[2]
 
     def __post_init__(self):
         """Validate batch consistency."""
@@ -77,7 +77,7 @@ class Batch:
         if self.static.shape[0] != batch_size:
             raise ValueError(f"static batch size ({self.static.shape[0]}) doesn't match X ({batch_size})")
 
-        if self.future is not None and self.future.shape[0] != batch_size:
+        if self.future.shape[0] != batch_size:
             raise ValueError(f"future batch size ({self.future.shape[0]}) doesn't match X ({batch_size})")
 
         if len(self.group_identifiers) != batch_size:
@@ -100,7 +100,7 @@ class Batch:
         if self.static.ndim != 2:
             raise ValueError(f"static must be 2D (batch, features), got shape {self.static.shape}")
 
-        if self.future is not None and self.future.ndim != 3:
+        if self.future.ndim != 3:
             raise ValueError(f"future must be 3D (batch, time, features), got shape {self.future.shape}")
 
     def to(self, device: torch.device) -> "Batch":
