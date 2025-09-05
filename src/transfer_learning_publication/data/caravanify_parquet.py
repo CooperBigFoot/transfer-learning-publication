@@ -4,7 +4,7 @@ import geopandas as gpd
 import pandas as pd
 import polars as pl
 
-from ..containers import TimeSeriesCollection
+from ..containers import StaticAttributeCollection, TimeSeriesCollection
 
 
 class CaravanDataSource:
@@ -512,7 +512,6 @@ class CaravanDataSource:
         Raises:
             ValueError: If data validation fails (indicates upstream processing error)
         """
-        # Collect the LazyFrame into memory
         df = lf.collect()
 
         if df.is_empty():
@@ -569,7 +568,9 @@ class CaravanDataSource:
             # Validate no duplicate dates
             dates = gauge_df["date"]
             if dates.n_unique() != len(dates):
-                raise ValueError(f"Gauge '{gauge_id}' has duplicate dates. This indicates an upstream processing error.")
+                raise ValueError(
+                    f"Gauge '{gauge_id}' has duplicate dates. This indicates an upstream processing error."
+                )
 
             # Extract feature data and convert to tensor
             feature_data = gauge_df.select(feature_columns)
@@ -620,10 +621,145 @@ class CaravanDataSource:
                         "This indicates an upstream processing error."
                     )
 
-        # Create and return the TimeSeriesCollection
         return TimeSeriesCollection(
             group_tensors=group_tensors,
             feature_names=feature_columns,
             date_ranges=date_ranges,
+            validate=True,  # Always validate to catch any remaining issues
+        )
+
+    def to_static_attribute_collection(self, lf: pl.LazyFrame) -> StaticAttributeCollection:
+        """
+        Convert a LazyFrame to StaticAttributeCollection.
+
+        Expects LazyFrame from get_static_attributes() with columns:
+        - 'gauge_id': Group identifier (string)
+        - attribute columns: All numeric attribute columns
+        - 'REGION_NAME', 'attribute_type', 'data_type': Optional metadata (ignored)
+
+        Args:
+            lf: LazyFrame from get_static_attributes()
+
+        Returns:
+            StaticAttributeCollection with data loaded into memory
+
+        Raises:
+            ValueError: If data validation fails (indicates upstream processing error)
+        """
+        df = lf.collect()
+
+        if df.is_empty():
+            # Return empty collection
+            return StaticAttributeCollection(group_tensors={}, attribute_names=[])
+
+        # Validate required columns
+        if "gauge_id" not in df.columns:
+            raise ValueError("Missing required column: gauge_id")
+
+        # Auto-detect attribute columns (exclude metadata)
+        metadata_columns = {"gauge_id", "REGION_NAME", "attribute_type", "data_type"}
+        attribute_columns = [col for col in df.columns if col not in metadata_columns]
+
+        if not attribute_columns:
+            raise ValueError("No attribute columns found after excluding metadata")
+
+        # Handle potential long format data - pivot if needed
+        # Check if we have multiple rows per gauge (indicating long format)
+        gauge_counts = df.group_by("gauge_id").len()
+        max_count = gauge_counts["len"].max() if len(gauge_counts) > 0 else 0
+
+        if max_count > 1:
+            # Long format detected - need to pivot to wide format
+            # This handles cases where attributes come from different attribute_types
+            if "attribute_type" not in df.columns:
+                raise ValueError(
+                    "Multiple rows per gauge detected but no 'attribute_type' column found. "
+                    "This indicates an upstream processing error."
+                )
+
+            # Get a single representative row per gauge to check structure
+            first_rows = df.group_by("gauge_id").first()
+            if len(first_rows) != df["gauge_id"].n_unique():
+                raise ValueError("Inconsistent data structure - cannot reliably pivot to wide format")
+
+            # Use the first row as our base and assume all attribute columns are present
+            df = first_rows
+
+        # Validate data types of attribute columns
+        for col in attribute_columns:
+            dtype = df[col].dtype
+            if dtype not in [
+                pl.Float32,
+                pl.Float64,
+                pl.Int8,
+                pl.Int16,
+                pl.Int32,
+                pl.Int64,
+                pl.UInt8,
+                pl.UInt16,
+                pl.UInt32,
+                pl.UInt64,
+            ]:
+                raise ValueError(
+                    f"Attribute column '{col}' has non-numeric dtype: {dtype}. "
+                    "All attribute columns must be numeric. This indicates an upstream processing error."
+                )
+
+        # Process each gauge
+        group_tensors = {}
+
+        # Get unique gauge_ids
+        gauge_ids = df["gauge_id"].unique().to_list()
+
+        for gauge_id in gauge_ids:
+            # Filter data for this gauge
+            gauge_df = df.filter(pl.col("gauge_id") == gauge_id)
+
+            # Should be exactly one row per gauge after handling long format
+            if len(gauge_df) != 1:
+                raise ValueError(
+                    f"Gauge '{gauge_id}' has {len(gauge_df)} rows, expected 1. "
+                    "This indicates an upstream processing error."
+                )
+
+            # Extract attribute data
+            attribute_data = gauge_df.select(attribute_columns)
+
+            # Check for nulls before conversion
+            if attribute_data.null_count().sum_horizontal()[0] > 0:
+                null_cols = [col for col in attribute_columns if gauge_df[col].null_count() > 0]
+                raise ValueError(
+                    f"Gauge '{gauge_id}' has null values in columns: {null_cols}. "
+                    "This indicates an upstream processing error."
+                )
+
+            # Convert to torch tensor - should be 1D
+            tensor = attribute_data.to_torch(dtype=pl.Float32)
+
+            # Ensure it's 1D (should be since we have 1 row)
+            if tensor.dim() != 2 or tensor.shape[0] != 1:
+                raise ValueError(f"Expected tensor shape (1, n_attributes) for gauge '{gauge_id}', got {tensor.shape}")
+
+            # Squeeze to get 1D tensor
+            tensor = tensor.squeeze(0)
+            group_tensors[gauge_id] = tensor
+
+        # Validate all gauges have the same attributes in the same order
+        if len(gauge_ids) > 1:
+            first_gauge = gauge_ids[0]
+            first_shape = group_tensors[first_gauge].shape[0]
+
+            for gauge_id in gauge_ids[1:]:
+                if group_tensors[gauge_id].shape[0] != first_shape:
+                    raise ValueError(
+                        f"Gauge '{gauge_id}' has {group_tensors[gauge_id].shape[0]} attributes, "
+                        f"but gauge '{first_gauge}' has {first_shape} attributes. "
+                        "All gauges must have the same attributes. "
+                        "This indicates an upstream processing error."
+                    )
+
+        return StaticAttributeCollection(
+            group_tensors=group_tensors,
+            attribute_names=attribute_columns,
             validate=True,  # Always validate to catch any remaining issues
         )
