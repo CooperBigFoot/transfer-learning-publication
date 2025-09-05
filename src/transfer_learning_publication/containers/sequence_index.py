@@ -300,31 +300,34 @@ class SequenceIndex:
 
     @staticmethod
     def find_valid_sequences(
-        time_series: "TimeSeriesCollection",
-        target_feature: str,
-        forcing_features: list[str],
+        time_series: TimeSeriesCollection,
         input_length: int,
         output_length: int,
     ) -> torch.LongTensor:
         """
-        Find all valid sequences in the time series data.
+        Generate all valid sequence indices for the time series.
 
-        This method will be implemented to scan through the TimeSeriesCollection
-        and identify all positions where valid sequences of the required length
-        can be extracted (no NaN values in the relevant features).
-
-        Args:
-            time_series: TimeSeriesCollection to search for valid sequences
-            target_feature: Name of the target feature to check for NaNs
-            forcing_features: List of forcing features to check for NaNs
-            input_length: Required length of input sequences
-            output_length: Required length of output sequences
-
-        Returns:
-            Tensor of shape (n_valid_sequences, 3) with [group_idx, start, end] for each sequence
-
-        Note:
-            Implementation to follow after confirming the interface.
+        Since TimeSeriesCollection guarantees no NaNs, this simply
+        creates all possible sliding windows of the required length.
         """
-        # TODO: Implement sequence finding logic
-        raise NotImplementedError("Sequence finding logic to be implemented")
+        total_length = input_length + output_length
+        sequences = []
+
+        for group_idx in range(len(time_series)):
+            group_length = time_series.get_group_length_by_idx(group_idx)
+
+            # Skip if group is too short
+            if group_length < total_length:
+                continue
+
+            # Generate all valid start positions
+            n_valid_starts = group_length - total_length + 1
+
+            for start_idx in range(n_valid_starts):
+                end_idx = start_idx + total_length
+                sequences.append([group_idx, start_idx, end_idx])
+
+        if sequences:
+            return torch.tensor(sequences, dtype=torch.long)
+        else:
+            return torch.empty((0, 3), dtype=torch.long)

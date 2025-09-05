@@ -260,33 +260,138 @@ class TestSequenceIndex:
         assert "n_groups_with_sequences=2" in repr_str
         assert "total_length=5" in repr_str
 
-    def test_find_valid_sequences_not_implemented(self):
-        """Test that find_valid_sequences raises NotImplementedError."""
-        # This is a placeholder test for the unimplemented method
-        with pytest.raises(NotImplementedError, match="Sequence finding logic"):
-            SequenceIndex.find_valid_sequences(
-                time_series=None,
-                target_feature="target",
-                forcing_features=["forcing1"],
-                input_length=3,
-                output_length=2,
-            )
+    def test_find_valid_sequences_basic(self):
+        """Test find_valid_sequences with basic time series."""
+        # Create simple time series without NaNs
+        tensor0 = torch.randn(10, 3, dtype=torch.float32)  # 10 timesteps
+        tensor1 = torch.randn(8, 3, dtype=torch.float32)  # 8 timesteps
+        tensor2 = torch.randn(3, 3, dtype=torch.float32)  # 3 timesteps (too short)
+
+        from datetime import datetime
+
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0, tensor1, tensor2],
+            feature_names=["feature1", "feature2", "feature3"],
+            date_ranges=[
+                (datetime(2020, 1, 1), datetime(2020, 1, 10)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 8)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 3)),
+            ],
+            group_identifiers=["group0", "group1", "group2"],
+        )
+
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+
+        # Group 0: length 10, total_length 5 -> 6 sequences (0-5, 1-6, ..., 5-10)
+        # Group 1: length 8, total_length 5 -> 4 sequences (0-5, 1-6, 2-7, 3-8)
+        # Group 2: length 3, total_length 5 -> 0 sequences (too short)
+        assert sequences.shape == (10, 3)
+
+        # Check first group sequences
+        group0_sequences = sequences[sequences[:, 0] == 0]
+        assert len(group0_sequences) == 6
+        assert group0_sequences[0].tolist() == [0, 0, 5]
+        assert group0_sequences[-1].tolist() == [0, 5, 10]
+
+        # Check second group sequences
+        group1_sequences = sequences[sequences[:, 0] == 1]
+        assert len(group1_sequences) == 4
+        assert group1_sequences[0].tolist() == [1, 0, 5]
+        assert group1_sequences[-1].tolist() == [1, 3, 8]
+
+        # Check third group (should have no sequences)
+        group2_sequences = sequences[sequences[:, 0] == 2]
+        assert len(group2_sequences) == 0
+
+    def test_find_valid_sequences_empty(self):
+        """Test find_valid_sequences with empty time series."""
+
+        time_series = TimeSeriesCollection(
+            tensors=[],
+            feature_names=["feature1"],
+            date_ranges=[],
+            group_identifiers=[],
+        )
+
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+
+        assert sequences.shape == (0, 3)
+        assert sequences.dtype == torch.long
+
+    def test_find_valid_sequences_exact_length(self):
+        """Test find_valid_sequences when group length exactly matches total_length."""
+        # Create time series with exact length match
+        tensor = torch.randn(5, 2, dtype=torch.float32)  # Exactly 5 timesteps
+
+        from datetime import datetime
+
+        time_series = TimeSeriesCollection(
+            tensors=[tensor],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[(datetime(2020, 1, 1), datetime(2020, 1, 5))],
+            group_identifiers=["group0"],
+        )
+
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+
+        # Should have exactly one sequence
+        assert sequences.shape == (1, 3)
+        assert sequences[0].tolist() == [0, 0, 5]
+
+    def test_find_valid_sequences_all_too_short(self):
+        """Test find_valid_sequences when all groups are too short."""
+        tensor0 = torch.randn(2, 3, dtype=torch.float32)  # Too short
+        tensor1 = torch.randn(3, 3, dtype=torch.float32)  # Too short
+
+        from datetime import datetime
+
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0, tensor1],
+            feature_names=["feature1", "feature2", "feature3"],
+            date_ranges=[
+                (datetime(2020, 1, 1), datetime(2020, 1, 2)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 3)),
+            ],
+            group_identifiers=["group0", "group1"],
+        )
+
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+
+        # Should return empty tensor with correct shape
+        assert sequences.shape == (0, 3)
+        assert sequences.dtype == torch.long
 
 
 class TestSequenceIndexIntegration:
     """Integration tests with TimeSeriesCollection."""
 
     @pytest.fixture
-    def time_series_with_nans(self):
-        """Create TimeSeriesCollection with some NaN values."""
-        # Group 0: 10 timesteps, NaNs at indices 3-4
+    def time_series_no_nans(self):
+        """Create TimeSeriesCollection without NaN values."""
+        # Group 0: 10 timesteps
         tensor0 = torch.tensor(
             [
                 [1.0, 10.0, 100.0],
                 [2.0, 20.0, 200.0],
                 [3.0, 30.0, 300.0],
-                [float("nan"), 40.0, 400.0],
-                [float("nan"), 50.0, 500.0],
+                [4.0, 40.0, 400.0],
+                [5.0, 50.0, 500.0],
                 [6.0, 60.0, 600.0],
                 [7.0, 70.0, 700.0],
                 [8.0, 80.0, 800.0],
@@ -296,7 +401,7 @@ class TestSequenceIndexIntegration:
             dtype=torch.float32,
         )
 
-        # Group 1: 8 timesteps, NaN in forcing feature at index 5
+        # Group 1: 8 timesteps
         tensor1 = torch.tensor(
             [
                 [1.0, 10.0, 100.0],
@@ -304,7 +409,7 @@ class TestSequenceIndexIntegration:
                 [3.0, 30.0, 300.0],
                 [4.0, 40.0, 400.0],
                 [5.0, 50.0, 500.0],
-                [6.0, float("nan"), 600.0],
+                [6.0, 60.0, 600.0],
                 [7.0, 70.0, 700.0],
                 [8.0, 80.0, 800.0],
             ],
@@ -320,30 +425,23 @@ class TestSequenceIndexIntegration:
         ]
         group_identifiers = ["group0", "group1"]
 
-        # Don't validate to allow NaNs
         return TimeSeriesCollection(
             tensors=[tensor0, tensor1],
             feature_names=feature_names,
             date_ranges=date_ranges,
             group_identifiers=group_identifiers,
-            validate=False,
         )
 
-    def test_sequence_index_with_find_valid_sequences_placeholder(self, time_series_with_nans):
-        """Test SequenceIndex with manually created sequences (until find_valid_sequences is implemented)."""
-        # Manually create valid sequences for testing
-        # For input_length=3, output_length=2 (total=5):
-        # Group 0: Valid sequences at 0-5 (before NaN), 5-10 (after NaN)
-        # Group 1: Valid sequences at 0-5 (before NaN in forcing)
-        sequences = torch.tensor(
-            [
-                [0, 0, 5],  # Group 0, indices 0-4
-                [0, 5, 10],  # Group 0, indices 5-9
-                [1, 0, 5],  # Group 1, indices 0-4
-            ],
-            dtype=torch.long,
+    def test_sequence_index_with_find_valid_sequences(self, time_series_no_nans):
+        """Test SequenceIndex with find_valid_sequences method."""
+        # Use find_valid_sequences to generate sequences
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series_no_nans,
+            input_length=3,
+            output_length=2,
         )
 
+        # Create index from generated sequences
         index = SequenceIndex(
             sequences=sequences,
             n_groups=2,
@@ -351,12 +449,84 @@ class TestSequenceIndexIntegration:
             output_length=2,
         )
 
-        assert index.n_sequences == 3
-        assert index.get_sequences_for_group(0).tolist() == [0, 1]
-        assert index.get_sequences_for_group(1).tolist() == [2]
+        # Group 0: 10 timesteps, total_length=5 -> 6 valid sequences
+        # Group 1: 8 timesteps, total_length=5 -> 4 valid sequences
+        assert index.n_sequences == 10
+        assert len(index.get_sequences_for_group(0)) == 6
+        assert len(index.get_sequences_for_group(1)) == 4
 
-        # Verify sequence access
+        # Verify first sequence of group 0
         group_idx, start_idx, end_idx = index.get_sequence_info(0)
         assert group_idx == 0
         assert start_idx == 0
         assert end_idx == 5
+
+        # Verify last sequence of group 0
+        group_idx, start_idx, end_idx = index.get_sequence_info(5)
+        assert group_idx == 0
+        assert start_idx == 5
+        assert end_idx == 10
+
+        # Verify first sequence of group 1
+        group_idx, start_idx, end_idx = index.get_sequence_info(6)
+        assert group_idx == 1
+        assert start_idx == 0
+        assert end_idx == 5
+
+        # Verify last sequence of group 1
+        group_idx, start_idx, end_idx = index.get_sequence_info(9)
+        assert group_idx == 1
+        assert start_idx == 3
+        assert end_idx == 8
+
+    def test_find_valid_sequences_with_mixed_lengths(self):
+        """Test find_valid_sequences with groups of varying lengths."""
+        # Create time series with very different lengths
+        tensor0 = torch.randn(20, 2, dtype=torch.float32)  # Long series
+        tensor1 = torch.randn(5, 2, dtype=torch.float32)  # Exactly minimum length
+        tensor2 = torch.randn(4, 2, dtype=torch.float32)  # Too short
+        tensor3 = torch.randn(7, 2, dtype=torch.float32)  # Slightly longer
+
+        from datetime import datetime
+
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0, tensor1, tensor2, tensor3],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[
+                (datetime(2020, 1, 1), datetime(2020, 1, 20)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 5)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 4)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 7)),
+            ],
+            group_identifiers=["group0", "group1", "group2", "group3"],
+        )
+
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+
+        # Group 0: 20 timesteps -> 16 sequences
+        # Group 1: 5 timesteps -> 1 sequence
+        # Group 2: 4 timesteps -> 0 sequences
+        # Group 3: 7 timesteps -> 3 sequences
+        # Total: 20 sequences
+        assert sequences.shape[0] == 20
+
+        # Verify sequences are ordered by group
+        group_indices = sequences[:, 0].tolist()
+        assert group_indices == [0] * 16 + [1] * 1 + [3] * 3
+
+        # Create index and verify
+        index = SequenceIndex(
+            sequences=sequences,
+            n_groups=4,
+            input_length=3,
+            output_length=2,
+        )
+
+        assert len(index.get_sequences_for_group(0)) == 16
+        assert len(index.get_sequences_for_group(1)) == 1
+        assert len(index.get_sequences_for_group(2)) == 0
+        assert len(index.get_sequences_for_group(3)) == 3
