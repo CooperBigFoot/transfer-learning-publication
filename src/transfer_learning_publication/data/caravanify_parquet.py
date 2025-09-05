@@ -4,6 +4,8 @@ import geopandas as gpd
 import pandas as pd
 import polars as pl
 
+from ..containers import TimeSeriesCollection
+
 
 class CaravanDataSource:
     """
@@ -490,3 +492,138 @@ class CaravanDataSource:
 
         n_gauges = df["gauge_id"].n_unique()
         logger.info(f"Wrote {len(unique_types)} attribute type(s) for {n_gauges} gauges to {output_path}")
+
+    def to_time_series_collection(self, lf: pl.LazyFrame) -> TimeSeriesCollection:
+        """
+        Convert a LazyFrame to TimeSeriesCollection.
+
+        Expects LazyFrame from get_timeseries() with columns:
+        - 'gauge_id': Group identifier (string)
+        - 'date': Date column
+        - feature columns: All other numeric columns
+        - 'REGION_NAME': Optional metadata (ignored)
+
+        Args:
+            lf: LazyFrame from get_timeseries()
+
+        Returns:
+            TimeSeriesCollection with data loaded into memory
+
+        Raises:
+            ValueError: If data validation fails (indicates upstream processing error)
+        """
+        # Collect the LazyFrame into memory
+        df = lf.collect()
+
+        if df.is_empty():
+            # Return empty collection
+            return TimeSeriesCollection(group_tensors={}, feature_names=[], date_ranges={})
+
+        # Validate required columns
+        required_columns = {"gauge_id", "date"}
+        if not required_columns.issubset(df.columns):
+            missing = required_columns - set(df.columns)
+            raise ValueError(f"Missing required columns: {missing}")
+
+        # Auto-detect feature columns (exclude metadata)
+        metadata_columns = {"gauge_id", "date", "REGION_NAME", "data_type"}
+        feature_columns = [col for col in df.columns if col not in metadata_columns]
+
+        if not feature_columns:
+            raise ValueError("No feature columns found after excluding metadata")
+
+        # Validate data types of feature columns
+        for col in feature_columns:
+            dtype = df[col].dtype
+            if dtype not in [
+                pl.Float32,
+                pl.Float64,
+                pl.Int8,
+                pl.Int16,
+                pl.Int32,
+                pl.Int64,
+                pl.UInt8,
+                pl.UInt16,
+                pl.UInt32,
+                pl.UInt64,
+            ]:
+                raise ValueError(
+                    f"Feature column '{col}' has non-numeric dtype: {dtype}. "
+                    "All feature columns must be numeric. This indicates an upstream processing error."
+                )
+
+        # Process each gauge
+        group_tensors = {}
+        date_ranges = {}
+
+        # Get unique gauge_ids
+        gauge_ids = df["gauge_id"].unique().to_list()
+
+        for gauge_id in gauge_ids:
+            # Filter data for this gauge
+            gauge_df = df.filter(pl.col("gauge_id") == gauge_id)
+
+            # Sort by date to ensure chronological order
+            gauge_df = gauge_df.sort("date")
+
+            # Validate no duplicate dates
+            dates = gauge_df["date"]
+            if dates.n_unique() != len(dates):
+                raise ValueError(f"Gauge '{gauge_id}' has duplicate dates. This indicates an upstream processing error.")
+
+            # Extract feature data and convert to tensor
+            feature_data = gauge_df.select(feature_columns)
+
+            # Check for nulls before conversion
+            if feature_data.null_count().sum_horizontal()[0] > 0:
+                null_cols = [col for col in feature_columns if gauge_df[col].null_count() > 0]
+                raise ValueError(
+                    f"Gauge '{gauge_id}' has null values in columns: {null_cols}. "
+                    "This indicates an upstream processing error."
+                )
+
+            # Convert to torch tensor using Polars' to_torch method
+            tensor = feature_data.to_torch(dtype=pl.Float32)
+            group_tensors[gauge_id] = tensor
+
+            # Extract date range
+            date_series = gauge_df["date"]
+            min_date = date_series.min()
+            max_date = date_series.max()
+
+            # Convert to datetime if needed (Polars dates to Python datetime)
+            if isinstance(min_date, pl.datatypes.Date):
+                min_date = min_date.to_py()
+            if isinstance(max_date, pl.datatypes.Date):
+                max_date = max_date.to_py()
+
+            from datetime import date, datetime
+
+            if isinstance(min_date, date) and not isinstance(min_date, datetime):
+                min_date = datetime.combine(min_date, datetime.min.time())
+            if isinstance(max_date, date) and not isinstance(max_date, datetime):
+                max_date = datetime.combine(max_date, datetime.min.time())
+
+            date_ranges[gauge_id] = (min_date, max_date)
+
+        # Validate all gauges have the same features in the same order
+        if len(gauge_ids) > 1:
+            first_gauge = gauge_ids[0]
+            first_shape = group_tensors[first_gauge].shape[1]
+
+            for gauge_id in gauge_ids[1:]:
+                if group_tensors[gauge_id].shape[1] != first_shape:
+                    raise ValueError(
+                        f"Gauge '{gauge_id}' has {group_tensors[gauge_id].shape[1]} features, "
+                        f"but gauge '{first_gauge}' has {first_shape} features. "
+                        "All gauges must have the same features. "
+                        "This indicates an upstream processing error."
+                    )
+
+        # Create and return the TimeSeriesCollection
+        return TimeSeriesCollection(
+            group_tensors=group_tensors,
+            feature_names=feature_columns,
+            date_ranges=date_ranges,
+            validate=True,  # Always validate to catch any remaining issues
+        )

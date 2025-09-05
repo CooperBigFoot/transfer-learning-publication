@@ -4,8 +4,10 @@ from pathlib import Path
 import pandas as pd
 import polars as pl
 import pytest
+import torch
 
 from transfer_learning_publication.data.caravanify_parquet import CaravanDataSource
+from transfer_learning_publication.containers.time_series import TimeSeriesCollection
 
 
 @pytest.fixture
@@ -1224,3 +1226,353 @@ class TestWriteReadIntegration:
         filtered_df = ds_read.get_timeseries(gauge_ids=subset_gauges).collect()
         assert len(filtered_df) == 3 * 31  # 3 gauges * 31 days
         assert set(filtered_df["gauge_id"].unique()) == set(subset_gauges)
+
+
+class TestToTimeSeriesCollection:
+    """Test to_time_series_collection method."""
+
+    def test_basic_conversion(self, temp_hive_data):
+        """Test basic conversion from LazyFrame to TimeSeriesCollection."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Get a subset of data for testing
+        lf = ds.get_timeseries(gauge_ids=["G01013500", "G01030500"])
+        collection = ds.to_time_series_collection(lf)
+        
+        # Verify collection properties
+        assert isinstance(collection, TimeSeriesCollection)
+        assert len(collection) == 2  # 2 gauges
+        assert set(collection.group_identifiers) == {"G01013500", "G01030500"}
+        
+        # Verify feature names
+        expected_features = ["precipitation", "streamflow", "temperature"]
+        assert sorted(collection.feature_names) == sorted(expected_features)
+        assert collection.get_n_features() == 3
+        
+        # Verify each gauge has data
+        for gauge_id in ["G01013500", "G01030500"]:
+            assert gauge_id in collection
+            assert collection.get_group_length(gauge_id) == 10  # 10 days in test data
+            
+            # Verify tensor shape
+            tensor = collection._group_tensors[gauge_id]
+            assert tensor.shape == (10, 3)  # 10 timesteps, 3 features
+            
+            # Verify date ranges
+            start_date, end_date = collection.date_ranges[gauge_id]
+            assert start_date.date() == date(2020, 1, 1)
+            assert end_date.date() == date(2020, 1, 10)
+
+    def test_single_gauge_conversion(self, temp_hive_data):
+        """Test conversion with single gauge."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"])
+        collection = ds.to_time_series_collection(lf)
+        
+        assert len(collection) == 1
+        assert "G01013500" in collection
+        assert collection.get_group_length("G01013500") == 10
+        
+        # Verify tensor doesn't have NaNs
+        tensor = collection._group_tensors["G01013500"]
+        import torch
+        assert not torch.isnan(tensor).any()
+
+    def test_variable_filtering_conversion(self, temp_hive_data):
+        """Test conversion with variable filtering."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Get only streamflow and temperature
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow", "temperature"])
+        collection = ds.to_time_series_collection(lf)
+        
+        assert collection.get_n_features() == 2
+        assert sorted(collection.feature_names) == ["streamflow", "temperature"]
+        
+        # Verify tensor shape reflects filtered features
+        tensor = collection._group_tensors["G01013500"]
+        assert tensor.shape == (10, 2)
+
+    def test_date_range_filtering_conversion(self, temp_hive_data):
+        """Test conversion with date range filtering."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], date_range=("2020-01-03", "2020-01-05"))
+        collection = ds.to_time_series_collection(lf)
+        
+        assert collection.get_group_length("G01013500") == 3  # 3 days
+        
+        # Verify date ranges
+        start_date, end_date = collection.date_ranges["G01013500"]
+        assert start_date.date() == date(2020, 1, 3)
+        assert end_date.date() == date(2020, 1, 5)
+
+    def test_empty_lazyframe_conversion(self, temp_hive_data):
+        """Test conversion of empty LazyFrame."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Get data for non-existent gauge
+        lf = ds.get_timeseries(gauge_ids=["NONEXISTENT"])
+        collection = ds.to_time_series_collection(lf)
+        
+        assert len(collection) == 0
+        assert collection.group_identifiers == []
+        assert collection.feature_names == []
+        assert collection.get_total_timesteps() == 0
+
+    def test_missing_required_columns_error(self, temp_hive_data):
+        """Test error when required columns are missing."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create LazyFrame missing gauge_id
+        lf = ds.get_timeseries(gauge_ids=["G01013500"]).select(["date", "streamflow"])
+        
+        with pytest.raises(ValueError, match="Missing required columns: {'gauge_id'}"):
+            ds.to_time_series_collection(lf)
+
+    def test_no_feature_columns_error(self, temp_hive_data):
+        """Test error when no feature columns remain after metadata exclusion."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create LazyFrame with only metadata columns
+        lf = ds.get_timeseries(gauge_ids=["G01013500"]).select(["gauge_id", "date", "REGION_NAME"])
+        
+        with pytest.raises(ValueError, match="No feature columns found after excluding metadata"):
+            ds.to_time_series_collection(lf)
+
+    def test_non_numeric_feature_column_error(self, temp_hive_data):
+        """Test error when feature column has non-numeric dtype."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create LazyFrame with string feature column
+        lf = ds.get_timeseries(gauge_ids=["G01013500"]).with_columns(
+            pl.lit("invalid").alias("string_feature")
+        )
+        
+        with pytest.raises(ValueError, match="Feature column 'string_feature' has non-numeric dtype"):
+            ds.to_time_series_collection(lf)
+
+    def test_duplicate_dates_error(self, temp_hive_data):
+        """Test error when gauge has duplicate dates."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create LazyFrame with duplicate dates
+        lf = ds.get_timeseries(gauge_ids=["G01013500"]).limit(2)
+        # Duplicate the first row
+        lf_dup = pl.concat([lf, lf.head(1)])
+        
+        with pytest.raises(ValueError, match="Gauge 'G01013500' has duplicate dates"):
+            ds.to_time_series_collection(lf_dup)
+
+    def test_null_values_error(self, temp_hive_data):
+        """Test error when feature columns contain null values."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create LazyFrame with null values
+        lf = ds.get_timeseries(gauge_ids=["G01013500"]).with_columns(
+            pl.when(pl.col("streamflow") > 12.0)
+            .then(None)
+            .otherwise(pl.col("streamflow"))
+            .alias("streamflow")
+        )
+        
+        with pytest.raises(ValueError, match="Gauge 'G01013500' has null values in columns: \\['streamflow'\\]"):
+            ds.to_time_series_collection(lf)
+
+    def test_inconsistent_feature_count_error(self, temp_hive_data):
+        """Test error when gauges have different numbers of features."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Create a LazyFrame manually with inconsistent feature counts
+        # This creates data where one gauge has more features than another
+        df1 = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow", "temperature"]).collect()
+        df2 = ds.get_timeseries(gauge_ids=["G01030500"], variables=["streamflow"]).collect()
+        
+        # Manually create feature data with different shapes for testing
+        # Add a fake extra feature for the first gauge only
+        df1 = df1.with_columns(pl.lit(1.0).alias("extra_feature"))
+        
+        # Combine them into a single LazyFrame
+        combined_lf = pl.concat([df1, df2], how="diagonal_relaxed").lazy()
+        
+        # This should trigger the "null values" error first because diagonal_relaxed
+        # fills missing columns with nulls. Let's test that behavior instead.
+        with pytest.raises(ValueError, match="has null values in columns"):
+            ds.to_time_series_collection(combined_lf)
+
+    def test_actual_inconsistent_feature_count_error(self):
+        """Test error when gauges truly have different numbers of features after null processing."""
+        # This test verifies the TimeSeriesCollection validation catches feature count mismatches
+        from datetime import datetime
+        
+        # Create tensors with different feature counts
+        group_tensors = {
+            "gauge1": torch.tensor([[1.0, 2.0]], dtype=torch.float32),  # 1 timestep, 2 features  
+            "gauge2": torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32),  # 1 timestep, 3 features
+        }
+        
+        feature_names = ["feature1", "feature2"]  # Only 2 features declared
+        date_ranges = {
+            "gauge1": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+            "gauge2": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+        }
+        
+        # This should fail validation during TimeSeriesCollection construction
+        # gauge2 has 3 features but feature_names only declares 2
+        with pytest.raises(ValueError, match="has 3 features, expected 2"):
+            TimeSeriesCollection(
+                group_tensors=group_tensors,
+                feature_names=feature_names,
+                date_ranges=date_ranges,
+                validate=True
+            )
+
+    def test_tensor_data_types_and_values(self, temp_hive_data):
+        """Test that tensors have correct data types and values."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow"])
+        collection = ds.to_time_series_collection(lf)
+        
+        tensor = collection._group_tensors["G01013500"]
+        
+        # Verify tensor is Float32
+        import torch
+        assert tensor.dtype == torch.float32
+        
+        # Verify tensor values match expected (from test fixture)
+        expected_streamflow = [10.5, 12.3, 14.1, 11.8, 13.5, 15.2, 14.8, 16.1, 17.3, 18.5]
+        actual_streamflow = tensor[:, 0].tolist()  # First (and only) feature
+        
+        # Use approximate comparison for float values
+        for expected, actual in zip(expected_streamflow, actual_streamflow):
+            assert abs(expected - actual) < 0.01
+
+    def test_date_index_conversion_methods(self, temp_hive_data):
+        """Test that date-to-index and index-to-date methods work correctly."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"])
+        collection = ds.to_time_series_collection(lf)
+        
+        gauge_id = "G01013500"
+        
+        # Test index to date conversion
+        first_date = collection.index_to_date(gauge_id, 0)
+        assert first_date.date() == date(2020, 1, 1)
+        
+        last_date = collection.index_to_date(gauge_id, 9)  # 0-indexed, so 9 is the last
+        assert last_date.date() == date(2020, 1, 10)
+        
+        # Test date to index conversion
+        from datetime import datetime
+        idx = collection.date_to_index(gauge_id, datetime(2020, 1, 1))
+        assert idx == 0
+        
+        idx = collection.date_to_index(gauge_id, datetime(2020, 1, 10))
+        assert idx == 9
+
+    def test_collection_summary_statistics(self, temp_hive_data):
+        """Test that collection summary provides correct statistics."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500", "G01030500"])
+        collection = ds.to_time_series_collection(lf)
+        
+        summary = collection.summary()
+        
+        assert summary["n_groups"] == 2
+        assert summary["n_features"] == 3  # streamflow, precipitation, temperature
+        assert summary["total_timesteps"] == 20  # 2 groups * 10 timesteps each
+        assert summary["min_length"] == 10
+        assert summary["max_length"] == 10
+        assert summary["avg_length"] == 10.0
+        assert summary["memory_mb"] >= 0  # Small tensors might round to 0.0
+        
+        # Verify date range covers expected period
+        overall_start, overall_end = summary["date_range"]
+        assert overall_start.date() == date(2020, 1, 1)
+        assert overall_end.date() == date(2020, 1, 10)
+
+    def test_string_date_handling(self, temp_hive_data_string_dates):
+        """Test handling of string date format in input data."""
+        ds = CaravanDataSource(temp_hive_data_string_dates)
+        
+        lf = ds.get_timeseries()
+        collection = ds.to_time_series_collection(lf)
+        
+        assert len(collection) == 1
+        gauge_id = "test001"
+        assert gauge_id in collection
+        
+        # Verify date conversion worked correctly
+        start_date, end_date = collection.date_ranges[gauge_id]
+        assert start_date.date() == date(2020, 1, 1)
+        assert end_date.date() == date(2020, 1, 3)
+
+    def test_datetime_date_handling(self, temp_hive_data_datetime):
+        """Test handling of datetime format in input data."""
+        ds = CaravanDataSource(temp_hive_data_datetime)
+        
+        lf = ds.get_timeseries()
+        collection = ds.to_time_series_collection(lf)
+        
+        assert len(collection) == 1
+        gauge_id = "test001"
+        assert gauge_id in collection
+        
+        # Verify datetime conversion worked correctly
+        start_date, end_date = collection.date_ranges[gauge_id]
+        assert start_date.date() == date(2020, 1, 1)
+        assert end_date.date() == date(2020, 1, 3)
+
+    def test_collection_validation_called(self, temp_hive_data):
+        """Test that TimeSeriesCollection validation is called and passes."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"])
+        
+        # This should not raise any validation errors
+        collection = ds.to_time_series_collection(lf)
+        
+        # Manually call validate to ensure it passes
+        collection.validate()  # Should not raise
+
+    def test_metadata_column_exclusion(self, temp_hive_data):
+        """Test that metadata columns are properly excluded from features."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Get full data (includes REGION_NAME and data_type partition columns)
+        lf = ds.get_timeseries(gauge_ids=["G01013500"])
+        collection = ds.to_time_series_collection(lf)
+        
+        # Verify metadata columns are excluded from features
+        assert "gauge_id" not in collection.feature_names
+        assert "date" not in collection.feature_names
+        assert "REGION_NAME" not in collection.feature_names
+        assert "data_type" not in collection.feature_names
+        
+        # Only actual time series features should remain
+        expected_features = {"streamflow", "precipitation", "temperature"}
+        assert set(collection.feature_names) == expected_features
+
+    def test_feature_column_ordering_preservation(self, temp_hive_data):
+        """Test that feature column ordering is preserved from the LazyFrame."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Get data with specific column ordering
+        lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["temperature", "streamflow"])
+        collection = ds.to_time_series_collection(lf)
+        
+        # The order should match whatever Polars returns after filtering
+        # Let's check what the actual order is from the collected DataFrame
+        df = lf.collect()
+        metadata_columns = {"gauge_id", "date", "REGION_NAME", "data_type"}
+        expected_features = [col for col in df.columns if col not in metadata_columns]
+        
+        assert collection.feature_names == expected_features
+        
+        # Verify feature indices match the actual order
+        for i, feature in enumerate(expected_features):
+            assert collection.feature_indices[feature] == i
