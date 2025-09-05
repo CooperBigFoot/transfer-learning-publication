@@ -1254,9 +1254,9 @@ class TestToTimeSeriesCollection:
             assert gauge_id in collection
             assert collection.get_group_length(gauge_id) == 10  # 10 days in test data
 
-            # Verify tensor shape
-            tensor = collection._group_tensors[gauge_id]
-            assert tensor.shape == (10, 3)  # 10 timesteps, 3 features
+            # Verify tensor shape by getting the series
+            series = collection.get_group_series(gauge_id, 0, 10)
+            assert series.shape == (10, 3)  # 10 timesteps, 3 features
 
             # Verify date ranges
             start_date, end_date = collection.date_ranges[gauge_id]
@@ -1275,10 +1275,10 @@ class TestToTimeSeriesCollection:
         assert collection.get_group_length("G01013500") == 10
 
         # Verify tensor doesn't have NaNs
-        tensor = collection._group_tensors["G01013500"]
+        series = collection.get_group_series("G01013500", 0, 10)
         import torch
 
-        assert not torch.isnan(tensor).any()
+        assert not torch.isnan(series).any()
 
     def test_variable_filtering_conversion(self, temp_hive_data):
         """Test conversion with variable filtering."""
@@ -1292,8 +1292,8 @@ class TestToTimeSeriesCollection:
         assert sorted(collection.feature_names) == ["streamflow", "temperature"]
 
         # Verify tensor shape reflects filtered features
-        tensor = collection._group_tensors["G01013500"]
-        assert tensor.shape == (10, 2)
+        series = collection.get_group_series("G01013500", 0, 10)
+        assert series.shape == (10, 2)
 
     def test_date_range_filtering_conversion(self, temp_hive_data):
         """Test conversion with date range filtering."""
@@ -1403,22 +1403,24 @@ class TestToTimeSeriesCollection:
         from datetime import datetime
 
         # Create tensors with different feature counts
-        group_tensors = {
-            "gauge1": torch.tensor([[1.0, 2.0]], dtype=torch.float32),  # 1 timestep, 2 features
-            "gauge2": torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32),  # 1 timestep, 3 features
-        }
+        tensors = [
+            torch.tensor([[1.0, 2.0]], dtype=torch.float32),  # 1 timestep, 2 features
+            torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32),  # 1 timestep, 3 features
+        ]
 
         feature_names = ["feature1", "feature2"]  # Only 2 features declared
-        date_ranges = {
-            "gauge1": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
-            "gauge2": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
-        }
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+            (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+        ]
+        group_identifiers = ["gauge1", "gauge2"]
 
         # This should fail validation during TimeSeriesCollection construction
         # gauge2 has 3 features but feature_names only declares 2
         with pytest.raises(ValueError, match="has 3 features, expected 2"):
             TimeSeriesCollection(
-                group_tensors=group_tensors, feature_names=feature_names, date_ranges=date_ranges, validate=True
+                tensors=tensors, feature_names=feature_names, date_ranges=date_ranges,
+                group_identifiers=group_identifiers, validate=True
             )
 
     def test_tensor_data_types_and_values(self, temp_hive_data):
@@ -1428,16 +1430,16 @@ class TestToTimeSeriesCollection:
         lf = ds.get_timeseries(gauge_ids=["G01013500"], variables=["streamflow"])
         collection = ds.to_time_series_collection(lf)
 
-        tensor = collection._group_tensors["G01013500"]
+        series = collection.get_group_series("G01013500", 0, 10)
 
         # Verify tensor is Float32
         import torch
 
-        assert tensor.dtype == torch.float32
+        assert series.dtype == torch.float32
 
         # Verify tensor values match expected (from test fixture)
         expected_streamflow = [10.5, 12.3, 14.1, 11.8, 13.5, 15.2, 14.8, 16.1, 17.3, 18.5]
-        actual_streamflow = tensor[:, 0].tolist()  # First (and only) feature
+        actual_streamflow = series[:, 0].tolist()  # First (and only) feature
 
         # Use approximate comparison for float values
         for expected, actual in zip(expected_streamflow, actual_streamflow, strict=False):

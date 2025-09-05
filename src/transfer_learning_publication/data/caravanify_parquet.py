@@ -516,7 +516,7 @@ class CaravanDataSource:
 
         if df.is_empty():
             # Return empty collection
-            return TimeSeriesCollection(group_tensors={}, feature_names=[], date_ranges={})
+            return TimeSeriesCollection(tensors=[], feature_names=[], date_ranges=[], group_identifiers=[])
 
         # Validate required columns
         required_columns = {"gauge_id", "date"}
@@ -552,11 +552,11 @@ class CaravanDataSource:
                 )
 
         # Process each gauge
-        group_tensors = {}
-        date_ranges = {}
+        tensors = []
+        date_ranges = []
 
-        # Get unique gauge_ids
-        gauge_ids = df["gauge_id"].unique().to_list()
+        # Get unique gauge_ids and sort them for consistent ordering
+        gauge_ids = sorted(df["gauge_id"].unique().to_list())
 
         for gauge_id in gauge_ids:
             # Filter data for this gauge
@@ -585,7 +585,7 @@ class CaravanDataSource:
 
             # Convert to torch tensor using Polars' to_torch method
             tensor = feature_data.to_torch(dtype=pl.Float32)
-            group_tensors[gauge_id] = tensor
+            tensors.append(tensor)
 
             # Extract date range
             date_series = gauge_df["date"]
@@ -605,26 +605,26 @@ class CaravanDataSource:
             if isinstance(max_date, date) and not isinstance(max_date, datetime):
                 max_date = datetime.combine(max_date, datetime.min.time())
 
-            date_ranges[gauge_id] = (min_date, max_date)
+            date_ranges.append((min_date, max_date))
 
         # Validate all gauges have the same features in the same order
         if len(gauge_ids) > 1:
-            first_gauge = gauge_ids[0]
-            first_shape = group_tensors[first_gauge].shape[1]
+            first_shape = tensors[0].shape[1]
 
-            for gauge_id in gauge_ids[1:]:
-                if group_tensors[gauge_id].shape[1] != first_shape:
+            for idx in range(1, len(gauge_ids)):
+                if tensors[idx].shape[1] != first_shape:
                     raise ValueError(
-                        f"Gauge '{gauge_id}' has {group_tensors[gauge_id].shape[1]} features, "
-                        f"but gauge '{first_gauge}' has {first_shape} features. "
+                        f"Gauge '{gauge_ids[idx]}' has {tensors[idx].shape[1]} features, "
+                        f"but gauge '{gauge_ids[0]}' has {first_shape} features. "
                         "All gauges must have the same features. "
                         "This indicates an upstream processing error."
                     )
 
         return TimeSeriesCollection(
-            group_tensors=group_tensors,
+            tensors=tensors,
             feature_names=feature_columns,
             date_ranges=date_ranges,
+            group_identifiers=gauge_ids,
             validate=True,  # Always validate to catch any remaining issues
         )
 
@@ -650,7 +650,7 @@ class CaravanDataSource:
 
         if df.is_empty():
             # Return empty collection
-            return StaticAttributeCollection(group_tensors={}, attribute_names=[])
+            return StaticAttributeCollection(tensors=[], attribute_names=[], group_identifiers=[])
 
         # Validate required columns
         if "gauge_id" not in df.columns:
@@ -706,10 +706,10 @@ class CaravanDataSource:
                 )
 
         # Process each gauge
-        group_tensors = {}
+        tensors = []
 
-        # Get unique gauge_ids
-        gauge_ids = df["gauge_id"].unique().to_list()
+        # Get unique gauge_ids and sort them for consistent ordering
+        gauge_ids = sorted(df["gauge_id"].unique().to_list())
 
         for gauge_id in gauge_ids:
             # Filter data for this gauge
@@ -742,24 +742,24 @@ class CaravanDataSource:
 
             # Squeeze to get 1D tensor
             tensor = tensor.squeeze(0)
-            group_tensors[gauge_id] = tensor
+            tensors.append(tensor)
 
         # Validate all gauges have the same attributes in the same order
         if len(gauge_ids) > 1:
-            first_gauge = gauge_ids[0]
-            first_shape = group_tensors[first_gauge].shape[0]
+            first_shape = tensors[0].shape[0]
 
-            for gauge_id in gauge_ids[1:]:
-                if group_tensors[gauge_id].shape[0] != first_shape:
+            for idx in range(1, len(gauge_ids)):
+                if tensors[idx].shape[0] != first_shape:
                     raise ValueError(
-                        f"Gauge '{gauge_id}' has {group_tensors[gauge_id].shape[0]} attributes, "
-                        f"but gauge '{first_gauge}' has {first_shape} attributes. "
+                        f"Gauge '{gauge_ids[idx]}' has {tensors[idx].shape[0]} attributes, "
+                        f"but gauge '{gauge_ids[0]}' has {first_shape} attributes. "
                         "All gauges must have the same attributes. "
                         "This indicates an upstream processing error."
                     )
 
         return StaticAttributeCollection(
-            group_tensors=group_tensors,
+            tensors=tensors,
             attribute_names=attribute_columns,
+            group_identifiers=gauge_ids,
             validate=True,  # Always validate to catch any remaining issues
         )

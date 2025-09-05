@@ -26,7 +26,8 @@
       "Read(/Users/cooper/Desktop/data_to_hive/timeseries/**)",
       "Read(/Users/cooper/Desktop/data_to_hive/timeseries/csv/**)",
       "WebSearch",
-      "Bash(uv add:*)"
+      "Bash(uv add:*)",
+      "Bash(sed:*)"
     ],
     "deny": [],
     "ask": []

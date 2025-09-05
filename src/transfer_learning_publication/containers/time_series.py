@@ -20,39 +20,89 @@ class TimeSeriesCollection:
     - Features are in the same order for all groups
     - Temporal coverage is continuous (no gaps in dates)
     - Date ranges are stored as metadata, positions are used for indexing
+    - Groups are accessed by integer indices for performance
     """
 
     def __init__(
         self,
-        group_tensors: dict[str, torch.Tensor],  # {group_identifier: Tensor[timesteps, features]}
+        tensors: list[torch.Tensor],  # List of tensors, one per group
         feature_names: list[str],  # Ordered list of feature names
-        date_ranges: dict[str, tuple[datetime, datetime]],  # {group_identifier: (start, end)}
+        date_ranges: list[tuple[datetime, datetime]],  # List of (start, end) tuples
+        group_identifiers: list[str],  # Ordered list of group identifiers
         validate: bool = True,
     ):
         """
         Args:
-            group_tensors: Dictionary mapping group identifiers to their time series tensors.
-                          Each tensor shape: (n_timesteps, n_features)
+            tensors: List of time series tensors, one per group.
+                    Each tensor shape: (n_timesteps, n_features)
             feature_names: Ordered list of feature names corresponding to tensor columns
-            date_ranges: Dictionary mapping group identifiers to (start_date, end_date) tuples
+            date_ranges: List of (start_date, end_date) tuples (same order as tensors)
+            group_identifiers: Ordered list of group identifiers (same order as tensors)
             validate: If True, validate data integrity (no NaNs, consistent shapes, etc.)
 
         Raises:
             ValueError: If validation fails (NaNs present, inconsistent features, etc.)
         """
-        self._group_tensors = group_tensors
+        self._tensors = tensors
         self._feature_names = list(feature_names)  # Copy to ensure immutability
-        self._date_ranges = dict(date_ranges)  # Copy to ensure immutability
+        self._date_ranges = list(date_ranges)  # Copy to ensure immutability
+        self._group_identifiers = list(group_identifiers)  # Copy to ensure immutability
 
-        # Build feature index mapping
+        # Validate input consistency
+        if len(self._tensors) != len(self._group_identifiers):
+            raise ValueError(
+                f"Number of tensors ({len(self._tensors)}) must match number of group identifiers "
+                f"({len(self._group_identifiers)})"
+            )
+        if len(self._tensors) != len(self._date_ranges):
+            raise ValueError(
+                f"Number of tensors ({len(self._tensors)}) must match number of date ranges "
+                f"({len(self._date_ranges)})"
+            )
+
+        # Build index mappings
+        self._group_to_idx = {group: idx for idx, group in enumerate(self._group_identifiers)}
         self._feature_indices = {name: idx for idx, name in enumerate(self._feature_names)}
 
         # Cache for computed properties
         self._n_features = len(self._feature_names)
-        self._group_ids = sorted(self._group_tensors.keys())
+        self._n_groups = len(self._tensors)
 
         if validate:
             self.validate()
+
+    def get_group_series_by_idx(self, group_idx: int, start_idx: int, end_idx: int) -> torch.Tensor:
+        """
+        Get time series slice for a group by index (fast path).
+
+        Args:
+            group_idx: Integer index of the group
+            start_idx: Start index (inclusive)
+            end_idx: End index (exclusive)
+
+        Returns:
+            Tensor of shape (end_idx - start_idx, n_features)
+
+        Raises:
+            IndexError: If group_idx or time indices are out of bounds
+            ValueError: If start_idx >= end_idx
+        """
+        if group_idx < 0 or group_idx >= self._n_groups:
+            raise IndexError(f"Group index {group_idx} out of bounds [0, {self._n_groups})")
+
+        tensor = self._tensors[group_idx]
+
+        # Validate indices
+        if start_idx < 0 or end_idx > tensor.shape[0]:
+            raise IndexError(
+                f"Index range [{start_idx}:{end_idx}) out of bounds for group at index {group_idx} "
+                f"with length {tensor.shape[0]}"
+            )
+
+        if start_idx >= end_idx:
+            raise ValueError(f"start_idx ({start_idx}) must be less than end_idx ({end_idx})")
+
+        return tensor[start_idx:end_idx]
 
     def get_group_series(self, group_identifier: str, start_idx: int, end_idx: int) -> torch.Tensor:
         """
@@ -70,10 +120,11 @@ class TimeSeriesCollection:
             KeyError: If group_identifier not found
             IndexError: If indices are out of bounds
         """
-        if group_identifier not in self._group_tensors:
+        if group_identifier not in self._group_to_idx:
             raise KeyError(f"Group '{group_identifier}' not found in collection")
 
-        tensor = self._group_tensors[group_identifier]
+        group_idx = self._group_to_idx[group_identifier]
+        tensor = self._tensors[group_idx]
 
         # Validate indices
         if start_idx < 0 or end_idx > tensor.shape[0]:
@@ -86,6 +137,30 @@ class TimeSeriesCollection:
             raise ValueError(f"start_idx ({start_idx}) must be less than end_idx ({end_idx})")
 
         return tensor[start_idx:end_idx]
+
+    def get_group_feature_by_idx(self, group_idx: int, feature: str, start_idx: int, end_idx: int) -> torch.Tensor:
+        """
+        Get specific feature slice for a group by index (fast path).
+
+        Args:
+            group_idx: Integer index of the group
+            feature: Feature name
+            start_idx: Start index (inclusive)
+            end_idx: End index (exclusive)
+
+        Returns:
+            Tensor of shape (end_idx - start_idx,)
+
+        Raises:
+            IndexError: If group_idx or time indices are out of bounds
+            KeyError: If feature not found
+        """
+        if feature not in self._feature_indices:
+            raise KeyError(f"Feature '{feature}' not found. Available: {self._feature_names}")
+
+        feature_idx = self._feature_indices[feature]
+        series = self.get_group_series_by_idx(group_idx, start_idx, end_idx)
+        return series[:, feature_idx]
 
     def get_group_feature(self, group_identifier: str, feature: str, start_idx: int, end_idx: int) -> torch.Tensor:
         """
@@ -114,7 +189,7 @@ class TimeSeriesCollection:
     @property
     def group_identifiers(self) -> list[str]:
         """Get list of all group identifiers."""
-        return self._group_ids.copy()
+        return self._group_identifiers.copy()
 
     @property
     def feature_names(self) -> list[str]:
@@ -127,9 +202,32 @@ class TimeSeriesCollection:
         return self._feature_indices.copy()
 
     @property
+    def group_to_idx(self) -> dict[str, int]:
+        """Get mapping from group identifiers to indices."""
+        return self._group_to_idx.copy()
+
+    @property
     def date_ranges(self) -> dict[str, tuple[datetime, datetime]]:
         """Get date ranges for each group."""
-        return self._date_ranges.copy()
+        # Reconstruct as dictionary for compatibility
+        return {self._group_identifiers[i]: self._date_ranges[i] for i in range(self._n_groups)}
+
+    def get_group_length_by_idx(self, group_idx: int) -> int:
+        """
+        Get number of timesteps for a group by index (fast path).
+
+        Args:
+            group_idx: Integer index of the group
+
+        Returns:
+            Number of timesteps
+
+        Raises:
+            IndexError: If group_idx is out of bounds
+        """
+        if group_idx < 0 or group_idx >= self._n_groups:
+            raise IndexError(f"Group index {group_idx} out of bounds [0, {self._n_groups})")
+        return self._tensors[group_idx].shape[0]
 
     def get_group_length(self, group_identifier: str) -> int:
         """
@@ -144,9 +242,10 @@ class TimeSeriesCollection:
         Raises:
             KeyError: If group not found
         """
-        if group_identifier not in self._group_tensors:
+        if group_identifier not in self._group_to_idx:
             raise KeyError(f"Group '{group_identifier}' not found")
-        return self._group_tensors[group_identifier].shape[0]
+        group_idx = self._group_to_idx[group_identifier]
+        return self._tensors[group_idx].shape[0]
 
     def get_n_features(self) -> int:
         """Get number of features (consistent across all groups)."""
@@ -154,7 +253,7 @@ class TimeSeriesCollection:
 
     def get_total_timesteps(self) -> int:
         """Get total timesteps across all groups."""
-        return sum(tensor.shape[0] for tensor in self._group_tensors.values())
+        return sum(tensor.shape[0] for tensor in self._tensors)
 
     def index_to_date(self, group_identifier: str, index: int) -> datetime:
         """
@@ -174,10 +273,11 @@ class TimeSeriesCollection:
             KeyError: If group not found
             IndexError: If index out of bounds
         """
-        if group_identifier not in self._date_ranges:
-            raise KeyError(f"Group '{group_identifier}' not found in date_ranges")
+        if group_identifier not in self._group_to_idx:
+            raise KeyError(f"Group '{group_identifier}' not found")
 
-        start_date, _ = self._date_ranges[group_identifier]
+        group_idx = self._group_to_idx[group_identifier]
+        start_date, _ = self._date_ranges[group_idx]
         group_length = self.get_group_length(group_identifier)
 
         if index < 0 or index >= group_length:
@@ -200,10 +300,11 @@ class TimeSeriesCollection:
             ValueError: If date is outside group's date range
             KeyError: If group not found
         """
-        if group_identifier not in self._date_ranges:
-            raise KeyError(f"Group '{group_identifier}' not found in date_ranges")
+        if group_identifier not in self._group_to_idx:
+            raise KeyError(f"Group '{group_identifier}' not found")
 
-        start_date, end_date = self._date_ranges[group_identifier]
+        group_idx = self._group_to_idx[group_identifier]
+        start_date, end_date = self._date_ranges[group_idx]
 
         # Normalize to date (remove time component) for consistent comparison
         from datetime import date as date_type
@@ -232,29 +333,17 @@ class TimeSeriesCollection:
         - No NaN values in any tensor
         - All tensors have correct number of features
         - Date ranges match tensor lengths (assuming daily frequency)
-        - All groups in date_ranges have corresponding tensors
-        - All groups have both tensor and date range
 
         Raises:
             ValueError: If any validation check fails
         """
-        # Check that all groups have both tensor and date range
-        tensor_groups = set(self._group_tensors.keys())
-        date_groups = set(self._date_ranges.keys())
-
-        if tensor_groups != date_groups:
-            missing_dates = tensor_groups - date_groups
-            missing_tensors = date_groups - tensor_groups
-            msg = []
-            if missing_dates:
-                msg.append(f"Groups with tensors but no dates: {missing_dates}")
-            if missing_tensors:
-                msg.append(f"Groups with dates but no tensors: {missing_tensors}")
-            raise ValueError(". ".join(msg))
+        if not self._tensors:
+            logger.warning("TimeSeriesCollection is empty")
+            return
 
         # Validate each group
-        for group_id in self._group_tensors:
-            tensor = self._group_tensors[group_id]
+        for idx, tensor in enumerate(self._tensors):
+            group_id = self._group_identifiers[idx]
 
             # Check for NaNs
             if torch.isnan(tensor).any():
@@ -269,7 +358,7 @@ class TimeSeriesCollection:
                 raise ValueError(f"Group '{group_id}' has {tensor.shape[1]} features, expected {self._n_features}")
 
             # Check date range consistency (assuming daily frequency)
-            start_date, end_date = self._date_ranges[group_id]
+            start_date, end_date = self._date_ranges[idx]
             expected_days = (end_date - start_date).days + 1  # +1 because end is inclusive
 
             if tensor.shape[0] != expected_days:
@@ -278,7 +367,7 @@ class TimeSeriesCollection:
                     f"[{start_date}, {end_date}] implies {expected_days} days"
                 )
 
-        logger.info(f"Validation passed for {len(self._group_tensors)} groups")
+        logger.info(f"Validation passed for {self._n_groups} groups")
 
     def summary(self) -> dict:
         """
@@ -295,7 +384,7 @@ class TimeSeriesCollection:
             - memory_mb: Approximate memory usage in MB
             - date_range: Overall min and max dates
         """
-        if not self._group_tensors:
+        if not self._tensors:
             return {
                 "n_groups": 0,
                 "n_features": self._n_features,
@@ -307,18 +396,18 @@ class TimeSeriesCollection:
                 "date_range": (None, None),
             }
 
-        lengths = [tensor.shape[0] for tensor in self._group_tensors.values()]
+        lengths = [tensor.shape[0] for tensor in self._tensors]
 
         # Calculate memory usage (using actual tensor dtypes)
-        memory_bytes = sum(tensor.numel() * tensor.element_size() for tensor in self._group_tensors.values())
+        memory_bytes = sum(tensor.numel() * tensor.element_size() for tensor in self._tensors)
         memory_mb = memory_bytes / (1024 * 1024)
 
         # Find overall date range
-        all_start_dates = [start for start, _ in self._date_ranges.values()]
-        all_end_dates = [end for _, end in self._date_ranges.values()]
+        all_start_dates = [start for start, _ in self._date_ranges]
+        all_end_dates = [end for _, end in self._date_ranges]
 
         return {
-            "n_groups": len(self._group_tensors),
+            "n_groups": self._n_groups,
             "n_features": self._n_features,
             "total_timesteps": sum(lengths),
             "min_length": min(lengths),
@@ -341,8 +430,8 @@ class TimeSeriesCollection:
 
     def __len__(self) -> int:
         """Number of groups in the collection."""
-        return len(self._group_tensors)
+        return self._n_groups
 
     def __contains__(self, group_identifier: str) -> bool:
         """Check if group exists in collection."""
-        return group_identifier in self._group_tensors
+        return group_identifier in self._group_to_idx

@@ -13,52 +13,55 @@ class TestTimeSeriesCollection:
     @pytest.fixture
     def basic_data(self):
         """Create basic test data with 2 groups."""
-        group_tensors = {
-            "group1": torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float32),
-            "group2": torch.tensor([[7.0, 8.0], [9.0, 10.0]], dtype=torch.float32),
-        }
+        tensors = [
+            torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]], dtype=torch.float32),
+            torch.tensor([[7.0, 8.0], [9.0, 10.0]], dtype=torch.float32),
+        ]
         feature_names = ["feature_a", "feature_b"]
-        date_ranges = {
-            "group1": (datetime(2020, 1, 1), datetime(2020, 1, 3)),
-            "group2": (datetime(2020, 1, 1), datetime(2020, 1, 2)),
-        }
-        return group_tensors, feature_names, date_ranges
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 1, 3)),
+            (datetime(2020, 1, 1), datetime(2020, 1, 2)),
+        ]
+        group_identifiers = ["group1", "group2"]
+        return tensors, feature_names, date_ranges, group_identifiers
 
     @pytest.fixture
     def empty_data(self):
         """Create empty test data."""
-        return {}, ["feature_a"], {}
+        return [], ["feature_a"], [], []
 
     @pytest.fixture
     def single_feature_data(self):
         """Create test data with single feature."""
-        group_tensors = {
-            "group1": torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float32),
-        }
+        tensors = [
+            torch.tensor([[1.0], [2.0], [3.0]], dtype=torch.float32),
+        ]
         feature_names = ["single_feature"]
-        date_ranges = {
-            "group1": (datetime(2020, 1, 1), datetime(2020, 1, 3)),
-        }
-        return group_tensors, feature_names, date_ranges
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 1, 3)),
+        ]
+        group_identifiers = ["group1"]
+        return tensors, feature_names, date_ranges, group_identifiers
 
     @pytest.fixture
     def mixed_dtype_data(self):
         """Create test data with different tensor dtypes."""
-        group_tensors = {
-            "group1": torch.tensor([[1.0, 2.0]], dtype=torch.float64),  # float64
-            "group2": torch.tensor([[3.0, 4.0]], dtype=torch.float32),  # float32
-        }
+        tensors = [
+            torch.tensor([[1.0, 2.0]], dtype=torch.float64),  # float64
+            torch.tensor([[3.0, 4.0]], dtype=torch.float32),  # float32
+        ]
         feature_names = ["feature_a", "feature_b"]
-        date_ranges = {
-            "group1": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
-            "group2": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
-        }
-        return group_tensors, feature_names, date_ranges
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+            (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+        ]
+        group_identifiers = ["group1", "group2"]
+        return tensors, feature_names, date_ranges, group_identifiers
 
     def test_basic_construction(self, basic_data):
         """Test basic construction with valid data."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert len(collection) == 2
         assert collection.get_n_features() == 2
@@ -69,57 +72,57 @@ class TestTimeSeriesCollection:
 
     def test_construction_without_validation(self, basic_data):
         """Test construction with validation disabled."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges, validate=False)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers, validate=False)
 
         assert len(collection) == 2
         assert collection.get_n_features() == 2
 
     def test_construction_with_nan_values(self, basic_data):
         """Test construction fails with NaN values when validation enabled."""
-        group_tensors, feature_names, date_ranges = basic_data
-        group_tensors["group1"][0, 0] = float("nan")
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        tensors[0][0, 0] = float("nan")
 
         with pytest.raises(ValueError, match="Group 'group1' contains 1 NaN values"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
     def test_construction_with_mismatched_features(self, basic_data):
         """Test construction fails with mismatched feature count."""
-        group_tensors, feature_names, date_ranges = basic_data
-        group_tensors["group1"] = torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)  # 3 features
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        tensors[0] = torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)  # 3 features
 
         with pytest.raises(ValueError, match="Group 'group1' has 3 features, expected 2"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
     def test_construction_with_mismatched_date_range(self, basic_data):
         """Test construction fails when date range doesn't match tensor length."""
-        group_tensors, feature_names, date_ranges = basic_data
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
         # group1 has 3 timesteps but date range implies 1 day
-        date_ranges["group1"] = (datetime(2020, 1, 1), datetime(2020, 1, 1))
+        date_ranges[0] = (datetime(2020, 1, 1), datetime(2020, 1, 1))
 
         with pytest.raises(ValueError, match="Group 'group1' has 3 timesteps but date range"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
     def test_construction_with_missing_date_ranges(self, basic_data):
         """Test construction fails with missing date ranges."""
-        group_tensors, feature_names, date_ranges = basic_data
-        del date_ranges["group1"]
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        date_ranges.pop(0)  # Remove first date range
 
-        with pytest.raises(ValueError, match="Groups with tensors but no dates"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        with pytest.raises(ValueError, match="Number of tensors.*must match number of date ranges"):
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
     def test_construction_with_missing_tensors(self, basic_data):
         """Test construction fails with missing tensors."""
-        group_tensors, feature_names, date_ranges = basic_data
-        del group_tensors["group1"]
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        tensors.pop(0)  # Remove first tensor
 
-        with pytest.raises(ValueError, match="Groups with dates but no tensors"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        with pytest.raises(ValueError, match="Number of tensors.*must match number of group identifiers"):
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
     def test_get_group_series_valid(self, basic_data):
         """Test get_group_series with valid inputs."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Get full series
         result = collection.get_group_series("group1", 0, 3)
@@ -133,16 +136,16 @@ class TestTimeSeriesCollection:
 
     def test_get_group_series_invalid_group(self, basic_data):
         """Test get_group_series with invalid group."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         with pytest.raises(KeyError, match="Group 'invalid' not found in collection"):
             collection.get_group_series("invalid", 0, 1)
 
     def test_get_group_series_invalid_indices(self, basic_data):
         """Test get_group_series with invalid indices."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Out of bounds end index
         with pytest.raises(IndexError, match="Index range .* out of bounds"):
@@ -158,8 +161,8 @@ class TestTimeSeriesCollection:
 
     def test_get_group_feature_valid(self, basic_data):
         """Test get_group_feature with valid inputs."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         result = collection.get_group_feature("group1", "feature_a", 0, 3)
         expected = torch.tensor([1.0, 3.0, 5.0])
@@ -171,16 +174,16 @@ class TestTimeSeriesCollection:
 
     def test_get_group_feature_invalid_feature(self, basic_data):
         """Test get_group_feature with invalid feature."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         with pytest.raises(KeyError, match="Feature 'invalid' not found"):
             collection.get_group_feature("group1", "invalid", 0, 1)
 
     def test_properties_immutability(self, basic_data):
         """Test that properties return immutable copies."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Test group_identifiers
         groups = collection.group_identifiers
@@ -202,8 +205,8 @@ class TestTimeSeriesCollection:
 
     def test_get_group_length(self, basic_data):
         """Test get_group_length method."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.get_group_length("group1") == 3
         assert collection.get_group_length("group2") == 2
@@ -213,8 +216,8 @@ class TestTimeSeriesCollection:
 
     def test_index_to_date(self, basic_data):
         """Test index_to_date conversion."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.index_to_date("group1", 0) == datetime(2020, 1, 1)
         assert collection.index_to_date("group1", 1) == datetime(2020, 1, 2)
@@ -223,13 +226,13 @@ class TestTimeSeriesCollection:
         with pytest.raises(IndexError, match="Index .* out of bounds"):
             collection.index_to_date("group1", 10)
 
-        with pytest.raises(KeyError, match="Group 'invalid' not found in date_ranges"):
+        with pytest.raises(KeyError, match="Group 'invalid' not found"):
             collection.index_to_date("invalid", 0)
 
     def test_date_to_index(self, basic_data):
         """Test date_to_index conversion."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.date_to_index("group1", datetime(2020, 1, 1)) == 0
         assert collection.date_to_index("group1", datetime(2020, 1, 2)) == 1
@@ -243,21 +246,21 @@ class TestTimeSeriesCollection:
         with pytest.raises(ValueError, match="Date .* outside range"):
             collection.date_to_index("group1", datetime(2020, 1, 10))
 
-        with pytest.raises(KeyError, match="Group 'invalid' not found in date_ranges"):
+        with pytest.raises(KeyError, match="Group 'invalid' not found"):
             collection.date_to_index("invalid", datetime(2020, 1, 1))
 
     def test_date_to_index_invalid_type(self, basic_data):
         """Test date_to_index with invalid date type."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         with pytest.raises(TypeError, match="Expected datetime or date object"):
             collection.date_to_index("group1", "2020-01-01")  # String instead of date
 
     def test_summary_with_data(self, basic_data):
         """Test summary method with data."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         summary = collection.summary()
 
@@ -272,8 +275,8 @@ class TestTimeSeriesCollection:
 
     def test_summary_empty(self, empty_data):
         """Test summary method with empty data."""
-        group_tensors, feature_names, date_ranges = empty_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = empty_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         summary = collection.summary()
 
@@ -288,8 +291,8 @@ class TestTimeSeriesCollection:
 
     def test_repr_string(self, basic_data):
         """Test __repr__ method."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         repr_str = repr(collection)
         assert "TimeSeriesCollection" in repr_str
@@ -300,8 +303,8 @@ class TestTimeSeriesCollection:
 
     def test_special_methods(self, basic_data):
         """Test special methods (__len__, __contains__)."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Test __len__
         assert len(collection) == 2
@@ -313,8 +316,8 @@ class TestTimeSeriesCollection:
 
     def test_single_feature_collection(self, single_feature_data):
         """Test collection with single feature."""
-        group_tensors, feature_names, date_ranges = single_feature_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = single_feature_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.get_n_features() == 1
         assert len(collection.feature_names) == 1
@@ -327,8 +330,8 @@ class TestTimeSeriesCollection:
 
     def test_memory_calculation_different_dtypes(self, mixed_dtype_data):
         """Test memory calculation with different tensor dtypes."""
-        group_tensors, feature_names, date_ranges = mixed_dtype_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = mixed_dtype_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         summary = collection.summary()
         # Note: This test shows that the memory calculation now uses actual tensor dtypes
@@ -336,24 +339,25 @@ class TestTimeSeriesCollection:
 
     def test_validation_logging(self, basic_data, caplog):
         """Test that validation logs success message."""
-        group_tensors, feature_names, date_ranges = basic_data
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
 
         with caplog.at_level(logging.INFO):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert "Validation passed for 2 groups" in caplog.text
 
     def test_edge_case_single_timestep(self):
         """Test collection with single timestep per group."""
-        group_tensors = {
-            "group1": torch.tensor([[1.0, 2.0]], dtype=torch.float32),
-        }
+        tensors = [
+            torch.tensor([[1.0, 2.0]], dtype=torch.float32),
+        ]
         feature_names = ["feature_a", "feature_b"]
-        date_ranges = {
-            "group1": (datetime(2020, 1, 1), datetime(2020, 1, 1)),
-        }
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 1, 1)),
+        ]
+        group_identifiers = ["group1"]
 
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.get_group_length("group1") == 1
         assert collection.get_total_timesteps() == 1
@@ -365,8 +369,8 @@ class TestTimeSeriesCollection:
 
     def test_feature_indices_property(self, basic_data):
         """Test feature_indices property."""
-        group_tensors, feature_names, date_ranges = basic_data
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         indices = collection.feature_indices
         assert indices["feature_a"] == 0
@@ -378,22 +382,54 @@ class TestTimeSeriesCollection:
 
     def test_large_date_ranges(self):
         """Test with larger date ranges to verify date calculations."""
-        group_tensors = {
-            "group1": torch.ones((365, 2), dtype=torch.float32),  # One year of daily data
-        }
+        tensors = [
+            torch.ones((365, 2), dtype=torch.float32),  # One year of daily data
+        ]
         feature_names = ["feature_a", "feature_b"]
-        date_ranges = {
-            "group1": (datetime(2020, 1, 1), datetime(2020, 12, 31)),  # 366 days (leap year)
-        }
+        date_ranges = [
+            (datetime(2020, 1, 1), datetime(2020, 12, 31)),  # 366 days (leap year)
+        ]
+        group_identifiers = ["group1"]
 
         # This should fail because tensor has 365 timesteps but leap year 2020 has 366 days
         with pytest.raises(ValueError, match="has 365 timesteps but date range.*implies 366 days"):
-            TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+            TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Fix the tensor size
-        group_tensors["group1"] = torch.ones((366, 2), dtype=torch.float32)
-        collection = TimeSeriesCollection(group_tensors, feature_names, date_ranges)
+        tensors[0] = torch.ones((366, 2), dtype=torch.float32)
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         assert collection.get_group_length("group1") == 366
         assert collection.index_to_date("group1", 0) == datetime(2020, 1, 1)
         assert collection.index_to_date("group1", 365) == datetime(2020, 12, 31)
+
+    def test_integer_based_access(self, basic_data):
+        """Test integer-based access methods (fast path)."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
+
+        # Test get_group_series_by_idx
+        result = collection.get_group_series_by_idx(0, 0, 3)
+        expected = torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
+        assert torch.equal(result, expected)
+
+        result = collection.get_group_series_by_idx(1, 0, 2)
+        expected = torch.tensor([[7.0, 8.0], [9.0, 10.0]])
+        assert torch.equal(result, expected)
+
+        # Test get_group_feature_by_idx
+        result = collection.get_group_feature_by_idx(0, "feature_a", 0, 3)
+        expected = torch.tensor([1.0, 3.0, 5.0])
+        assert torch.equal(result, expected)
+
+        # Test get_group_length_by_idx
+        assert collection.get_group_length_by_idx(0) == 3
+        assert collection.get_group_length_by_idx(1) == 2
+
+        # Test out of bounds
+        with pytest.raises(IndexError, match="Group index 2 out of bounds"):
+            collection.get_group_series_by_idx(2, 0, 1)
+
+        # Test group_to_idx mapping
+        assert collection.group_to_idx["group1"] == 0
+        assert collection.group_to_idx["group2"] == 1
