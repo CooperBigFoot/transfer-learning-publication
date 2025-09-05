@@ -1,3 +1,7 @@
+import tempfile
+from pathlib import Path
+
+import joblib
 import numpy as np
 import polars as pl
 import pytest
@@ -268,3 +272,313 @@ class TestCompositePipeline:
         assert summary[1]["pipeline_type"] == "global"
         assert summary[1]["transforms"] == ["ZScore"]
         assert summary[1]["columns"] == ["precipitation"]
+
+
+class TestCompositePipelineJoblib:
+    """Test joblib serialization/deserialization of CompositePipeline."""
+
+    @pytest.fixture
+    def sample_dataframe(self):
+        """Create sample test DataFrame."""
+        return pl.DataFrame(
+            {
+                "basin_id": [1, 1, 1, 2, 2, 2],
+                "streamflow": [10.0, 15.0, 12.0, 8.0, 11.0, 9.0],
+                "precipitation": [2.0, 3.0, 2.5, 1.5, 2.8, 1.8],
+                "temperature": [20.0, 22.0, 21.0, 18.0, 19.0, 17.0],
+                "other_col": [1, 2, 3, 4, 5, 6],
+            }
+        )
+
+    @pytest.fixture
+    def complex_dataframe(self):
+        """Create more complex test DataFrame with string group identifiers."""
+        return pl.DataFrame(
+            {
+                "watershed": ["ws_a", "ws_a", "ws_a", "ws_b", "ws_b", "ws_b", "ws_c", "ws_c"],
+                "streamflow": [10.0, 15.0, 12.0, 8.0, 11.0, 9.0, 25.0, 30.0],
+                "precipitation": [2.0, 3.0, 2.5, 1.5, 2.8, 1.8, 4.0, 5.0],
+                "temperature": [20.0, 22.0, 21.0, 18.0, 19.0, 17.0, 25.0, 28.0],
+                "elevation": [100.0, 105.0, 102.0, 80.0, 85.0, 82.0, 200.0, 210.0],
+            }
+        )
+
+    @pytest.fixture
+    def single_step_pipeline(self):
+        """Create single-step pipeline for testing."""
+        steps = [CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"])]
+        return CompositePipeline(steps, group_identifier="basin_id")
+
+    @pytest.fixture
+    def multi_step_pipeline(self):
+        """Create multi-step pipeline for testing."""
+        steps = [
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
+            CompositePipelineStep(
+                pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"]
+            ),
+        ]
+        return CompositePipeline(steps, group_identifier="basin_id")
+
+    @pytest.fixture
+    def complex_pipeline(self):
+        """Create complex multi-step pipeline with string group identifiers."""
+        steps = [
+            CompositePipelineStep(
+                pipeline_type="per_basin", transforms=[Log(), ZScore()], columns=["streamflow", "precipitation"]
+            ),
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["temperature", "elevation"]),
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["elevation"]),
+        ]
+        return CompositePipeline(steps, group_identifier="watershed")
+
+    def test_unfitted_pipeline_serialization(self, single_step_pipeline):
+        """Test serialization of unfitted pipeline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "unfitted_pipeline.joblib"
+
+            # Save unfitted pipeline
+            joblib.dump(single_step_pipeline, filepath)
+
+            # Load and verify
+            loaded_pipeline = joblib.load(filepath)
+
+            assert isinstance(loaded_pipeline, CompositePipeline)
+            assert loaded_pipeline.group_identifier == single_step_pipeline.group_identifier
+            assert len(loaded_pipeline.steps) == len(single_step_pipeline.steps)
+            assert loaded_pipeline._is_fitted == single_step_pipeline._is_fitted == False
+            assert len(loaded_pipeline._fitted_steps) == len(single_step_pipeline._fitted_steps) == 0
+            assert loaded_pipeline._group_mapping == single_step_pipeline._group_mapping == {}
+
+    def test_fitted_single_step_pipeline_serialization(self, single_step_pipeline, sample_dataframe):
+        """Test serialization of fitted single-step pipeline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "fitted_pipeline.joblib"
+
+            # Fit pipeline
+            single_step_pipeline.fit(sample_dataframe)
+
+            # Save fitted pipeline
+            joblib.dump(single_step_pipeline, filepath)
+
+            # Load and verify basic properties
+            loaded_pipeline = joblib.load(filepath)
+
+            assert isinstance(loaded_pipeline, CompositePipeline)
+            assert loaded_pipeline._is_fitted
+            assert len(loaded_pipeline._fitted_steps) == 1
+            assert loaded_pipeline.group_identifier == "basin_id"
+
+            # Verify group mapping is preserved
+            assert loaded_pipeline._group_mapping == single_step_pipeline._group_mapping
+
+    def test_fitted_single_step_transform_consistency(self, single_step_pipeline, sample_dataframe):
+        """Test that serialized pipeline produces identical transform results."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "fitted_pipeline.joblib"
+
+            # Fit and get original transform result
+            original_transformed = single_step_pipeline.fit_transform(sample_dataframe)
+
+            # Save and load pipeline
+            joblib.dump(single_step_pipeline, filepath)
+            loaded_pipeline = joblib.load(filepath)
+
+            # Transform with loaded pipeline
+            loaded_transformed = loaded_pipeline.transform(sample_dataframe)
+
+            # Results should be identical
+            assert original_transformed.equals(loaded_transformed)
+
+    def test_fitted_single_step_inverse_transform_consistency(self, single_step_pipeline, sample_dataframe):
+        """Test that serialized pipeline produces identical inverse transform results."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "fitted_pipeline.joblib"
+
+            # Fit and transform
+            transformed_data = single_step_pipeline.fit_transform(sample_dataframe)
+
+            # Get original inverse transform
+            original_inverse = single_step_pipeline.inverse_transform(transformed_data)
+
+            # Save and load pipeline
+            joblib.dump(single_step_pipeline, filepath)
+            loaded_pipeline = joblib.load(filepath)
+
+            # Inverse transform with loaded pipeline
+            loaded_inverse = loaded_pipeline.inverse_transform(transformed_data)
+
+            # Results should be identical
+            assert original_inverse.equals(loaded_inverse)
+
+    def test_multi_step_pipeline_serialization(self, multi_step_pipeline, sample_dataframe):
+        """Test serialization of multi-step pipeline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "multi_step_pipeline.joblib"
+
+            # Fit pipeline
+            original_transformed = multi_step_pipeline.fit_transform(sample_dataframe)
+
+            # Save pipeline
+            joblib.dump(multi_step_pipeline, filepath)
+
+            # Load and verify
+            loaded_pipeline = joblib.load(filepath)
+
+            assert loaded_pipeline._is_fitted
+            assert len(loaded_pipeline._fitted_steps) == 2
+
+            # Test transform consistency
+            loaded_transformed = loaded_pipeline.transform(sample_dataframe)
+            assert original_transformed.equals(loaded_transformed)
+
+            # Test inverse transform consistency
+            original_inverse = multi_step_pipeline.inverse_transform(original_transformed)
+            loaded_inverse = loaded_pipeline.inverse_transform(loaded_transformed)
+            assert original_inverse.equals(loaded_inverse)
+
+    def test_complex_pipeline_with_string_groups(self, complex_pipeline, complex_dataframe):
+        """Test serialization with string group identifiers and complex pipeline."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "complex_pipeline.joblib"
+
+            # Fit and get original results
+            original_transformed = complex_pipeline.fit_transform(complex_dataframe)
+
+            # Save pipeline
+            joblib.dump(complex_pipeline, filepath)
+
+            # Load pipeline
+            loaded_pipeline = joblib.load(filepath)
+
+            # Verify basic properties
+            assert loaded_pipeline._is_fitted
+            assert len(loaded_pipeline._fitted_steps) == 3
+            assert loaded_pipeline.group_identifier == "watershed"
+
+            # Verify group mapping preservation (string identifiers)
+            assert loaded_pipeline._group_mapping == complex_pipeline._group_mapping
+            assert all(isinstance(v, str) for v in loaded_pipeline._group_mapping.values())
+
+            # Test transform consistency
+            loaded_transformed = loaded_pipeline.transform(complex_dataframe)
+            assert original_transformed.equals(loaded_transformed)
+
+            # Test full roundtrip consistency
+            original_inverse = complex_pipeline.inverse_transform(original_transformed)
+            loaded_inverse = loaded_pipeline.inverse_transform(loaded_transformed)
+            assert original_inverse.equals(loaded_inverse)
+
+    def test_pipeline_state_isolation_after_serialization(self, single_step_pipeline, sample_dataframe):
+        """Test that serialized pipeline doesn't affect original pipeline state."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "isolated_pipeline.joblib"
+
+            # Fit original pipeline
+            single_step_pipeline.fit(sample_dataframe)
+            original_fitted_steps_count = len(single_step_pipeline._fitted_steps)
+
+            # Save and load
+            joblib.dump(single_step_pipeline, filepath)
+            loaded_pipeline = joblib.load(filepath)
+
+            # Modify loaded pipeline's internal state (simulate usage)
+            test_data = sample_dataframe.with_columns(pl.col("streamflow") * 2)
+            loaded_pipeline.transform(test_data)
+
+            # Original pipeline should be unchanged
+            assert len(single_step_pipeline._fitted_steps) == original_fitted_steps_count
+            assert single_step_pipeline._is_fitted
+
+    def test_multiple_save_load_cycles(self, multi_step_pipeline, sample_dataframe):
+        """Test multiple save/load cycles maintain consistency."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            # Initial fit
+            original_result = multi_step_pipeline.fit_transform(sample_dataframe)
+
+            for cycle in range(3):
+                filepath = Path(temp_dir) / f"cycle_{cycle}_pipeline.joblib"
+
+                # Save current pipeline
+                joblib.dump(multi_step_pipeline, filepath)
+
+                # Load pipeline
+                multi_step_pipeline = joblib.load(filepath)
+
+                # Verify consistency
+                current_result = multi_step_pipeline.transform(sample_dataframe)
+                assert original_result.equals(current_result)
+
+    def test_serialization_with_new_data_after_load(self, single_step_pipeline, sample_dataframe):
+        """Test that loaded pipeline works with new data (same structure)."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "pipeline_new_data.joblib"
+
+            # Fit with original data
+            single_step_pipeline.fit(sample_dataframe)
+
+            # Save pipeline
+            joblib.dump(single_step_pipeline, filepath)
+
+            # Create new data with same structure but different values
+            new_data = pl.DataFrame(
+                {
+                    "basin_id": [1, 1, 2, 2, 3, 3],  # Note: includes new group '3'
+                    "streamflow": [20.0, 25.0, 18.0, 22.0, 30.0, 35.0],
+                    "precipitation": [3.0, 4.0, 2.5, 3.5, 5.0, 6.0],
+                    "temperature": [25.0, 27.0, 23.0, 26.0, 30.0, 32.0],
+                    "other_col": [7, 8, 9, 10, 11, 12],
+                }
+            )
+
+            # Load pipeline and test with new data
+            loaded_pipeline = joblib.load(filepath)
+
+            # Transform should work (with warning for unseen group)
+            with pytest.warns(RuntimeWarning, match="Groups .* were not seen during fit"):
+                result = loaded_pipeline.transform(new_data)
+
+            assert isinstance(result, pl.DataFrame)
+            assert result.shape == new_data.shape
+
+    def test_get_step_summary_after_serialization(self, multi_step_pipeline, sample_dataframe):
+        """Test that step summary works correctly after serialization."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "pipeline_summary.joblib"
+
+            # Fit and get original summary
+            multi_step_pipeline.fit(sample_dataframe)
+            original_summary = multi_step_pipeline.get_step_summary()
+
+            # Save and load
+            joblib.dump(multi_step_pipeline, filepath)
+            loaded_pipeline = joblib.load(filepath)
+
+            # Get loaded summary
+            loaded_summary = loaded_pipeline.get_step_summary()
+
+            # Should be identical
+            assert loaded_summary == original_summary
+            assert all(step["fitted"] for step in loaded_summary)
+
+    def test_error_handling_after_serialization(self, single_step_pipeline, sample_dataframe):
+        """Test that error handling works correctly after serialization."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "pipeline_errors.joblib"
+
+            # Fit and save
+            single_step_pipeline.fit(sample_dataframe)
+            joblib.dump(single_step_pipeline, filepath)
+
+            # Load pipeline
+            loaded_pipeline = joblib.load(filepath)
+
+            # Test error cases still work
+            invalid_df = pl.DataFrame({"wrong_column": [1, 2, 3]})
+
+            with pytest.raises(ValueError, match="Group identifier 'basin_id' not found"):
+                loaded_pipeline.transform(invalid_df)
+
+            missing_col_df = sample_dataframe.drop("streamflow")
+            with pytest.raises(ValueError, match="Columns \\['streamflow'\\] not found"):
+                loaded_pipeline.transform(missing_col_df)
