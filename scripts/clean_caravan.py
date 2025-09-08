@@ -11,6 +11,8 @@ logging.basicConfig(filename=f"logs/cleaning_{datetime.now():%Y%m%d_%H%M%S}.log"
 def clean_caravan_data(base_path: str, output_path: str, region: str, variables: list[str]):
     """Main cleaning function for a single region"""
 
+    logging.info(f"Starting cleaning for region {region}")
+
     # Initialize data source
     caravan = CaravanDataSource(base_path, region=region)
 
@@ -36,9 +38,9 @@ def clean_caravan_data(base_path: str, output_path: str, region: str, variables:
 
             train, val, test = train_val_test_split(lf_clean, 0.5, 0.25)
 
-            caravan.write_timeseries(train.collect(), f"{output_path}/train/")
-            caravan.write_timeseries(val.collect(), f"{output_path}/val/")
-            caravan.write_timeseries(test.collect(), f"{output_path}/test/")
+            caravan.write_timeseries(train.collect(), f"{output_path}/train/", overwrite=True)
+            caravan.write_timeseries(val.collect(), f"{output_path}/val/", overwrite=True)
+            caravan.write_timeseries(test.collect(), f"{output_path}/test/", overwrite=True)
 
             logging.info(f"  [{i}/{len(gauge_ids)}] ✓ {gauge_id}")
 
