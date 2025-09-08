@@ -28,7 +28,9 @@
       "WebSearch",
       "Bash(uv add:*)",
       "Bash(sed:*)",
-      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/data_type=timeseries/**)"
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/data_type=timeseries/**)",
+      "mcp__ide__executeCode",
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/**)"
     ],
     "deny": [],
     "ask": []

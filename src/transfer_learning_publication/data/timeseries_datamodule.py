@@ -17,7 +17,6 @@ from .lsh_dataset import LSHDataset
 
 logger = logging.getLogger(__name__)
 
-# TODO: I want to be able to control the random see
 class LSHDataModule(LightningDataModule):
     """
     PyTorch Lightning DataModule for time series forecasting.
@@ -148,7 +147,6 @@ class LSHDataModule(LightningDataModule):
 
         caravan = CaravanDataSource(base_path=base_path, region=self.config["data"]["region"])
 
-        # Get all basins
         basins = caravan.list_gauge_ids()
         if not basins:
             raise ValueError(f"No basins found for split '{split}' in {base_path}")
@@ -167,8 +165,8 @@ class LSHDataModule(LightningDataModule):
         time_series = caravan.to_time_series_collection(ts_lf)
         static_attributes = caravan.to_static_attribute_collection(static_lf)
 
-        # Validate we got the expected features
-        if time_series.feature_names != forcing_columns:
+        # Validate we got the expected features (order-independent)
+        if set(time_series.feature_names) != set(forcing_columns):
             raise ValueError(f"Feature mismatch: expected {forcing_columns}, got {time_series.feature_names}")
 
         # Build dataset configuration

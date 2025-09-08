@@ -223,6 +223,8 @@ class CaravanDataSource:
         Returns:
             LazyFrame with timeseries data
         """
+        import warnings
+        
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - return empty LazyFrame
             empty_df = pl.DataFrame({
@@ -262,6 +264,18 @@ class CaravanDataSource:
             # Keep metadata columns plus requested columns
             keep_cols = {"REGION_NAME", "gauge_id", "date"} | set(columns)
             available_cols = set(lf.collect_schema().names())
+            
+            # Check for missing columns and warn
+            requested_cols = set(columns)
+            missing_cols = requested_cols - available_cols
+            if missing_cols:
+                warnings.warn(
+                    f"Requested timeseries columns not found in data: {sorted(missing_cols)}. "
+                    f"Available columns: {sorted(available_cols - {'REGION_NAME', 'gauge_id', 'date', 'data_type'})}",
+                    UserWarning,
+                    stacklevel=2
+                )
+            
             cols_to_select = list(keep_cols & available_cols)
             lf = lf.select(cols_to_select)
 
@@ -282,6 +296,8 @@ class CaravanDataSource:
         Returns:
             LazyFrame with static attributes
         """
+        import warnings
+        
         if isinstance(self._attr_glob, list) and not self._attr_glob:
             # Empty list - return empty LazyFrame
             empty_df = pl.DataFrame(
@@ -329,6 +345,18 @@ class CaravanDataSource:
             # Keep metadata columns plus requested attributes
             keep_cols = {"REGION_NAME", "gauge_id"} | set(columns)
             available_cols = set(lf.collect_schema().names())
+            
+            # Check for missing columns and warn
+            requested_cols = set(columns)
+            missing_cols = requested_cols - available_cols
+            if missing_cols:
+                warnings.warn(
+                    f"Requested attribute columns not found in data: {sorted(missing_cols)}. "
+                    f"Available columns: {sorted(available_cols - {'REGION_NAME', 'gauge_id', 'data_type'})}",
+                    UserWarning,
+                    stacklevel=2
+                )
+            
             cols_to_select = list(keep_cols & available_cols)
             lf = lf.select(cols_to_select)
 

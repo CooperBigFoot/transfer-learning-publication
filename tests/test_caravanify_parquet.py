@@ -524,7 +524,8 @@ class TestErrorHandling:
         ds = CaravanDataSource(temp_hive_data)
 
         # Should only return metadata columns when variable doesn't exist
-        ts_data = ds.get_timeseries(columns=["nonexistent"]).collect()
+        with pytest.warns(UserWarning, match="Requested timeseries columns not found in data: \\['nonexistent'\\]"):
+            ts_data = ds.get_timeseries(columns=["nonexistent"]).collect()
         assert len(ts_data) == 50  # Still returns rows
         assert "nonexistent" not in ts_data.columns
         assert set(ts_data.columns) == {"REGION_NAME", "gauge_id", "date"}
@@ -537,6 +538,101 @@ class TestErrorHandling:
         date_range = ("2020-01-01", "2020-01-05")
         ts_data = ds.get_timeseries(date_range=date_range).collect()
         assert len(ts_data) == 25  # 5 gauges * 5 days
+
+    def test_warn_missing_timeseries_columns(self, temp_hive_data):
+        """Test warning when requesting non-existent timeseries columns."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Request mix of existing and non-existent columns
+        with pytest.warns(UserWarning) as record:
+            ts_data = ds.get_timeseries(
+                columns=["streamflow", "nonexistent1", "temperature", "nonexistent2"]
+            ).collect()
+        
+        # Check warning message contains missing columns
+        assert len(record) == 1
+        warning_msg = str(record[0].message)
+        assert "nonexistent1" in warning_msg
+        assert "nonexistent2" in warning_msg
+        assert "Requested timeseries columns not found in data" in warning_msg
+        assert "Available columns:" in warning_msg
+        
+        # Verify only existing columns are returned
+        assert "streamflow" in ts_data.columns
+        assert "temperature" in ts_data.columns
+        assert "nonexistent1" not in ts_data.columns
+        assert "nonexistent2" not in ts_data.columns
+
+    def test_warn_missing_static_attributes(self, temp_hive_data):
+        """Test warning when requesting non-existent attribute columns."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Request mix of existing and non-existent attributes
+        with pytest.warns(UserWarning) as record:
+            attrs = ds.get_static_attributes(
+                columns=["area", "nonexistent_attr", "elevation", "missing_col"]
+            ).collect()
+        
+        # Check warning message contains missing columns
+        assert len(record) == 1
+        warning_msg = str(record[0].message)
+        assert "nonexistent_attr" in warning_msg
+        assert "missing_col" in warning_msg
+        assert "Requested attribute columns not found in data" in warning_msg
+        assert "Available columns:" in warning_msg
+        
+        # Verify only existing columns are returned
+        assert "area" in attrs.columns
+        assert "elevation" in attrs.columns
+        assert "nonexistent_attr" not in attrs.columns
+        assert "missing_col" not in attrs.columns
+
+    def test_no_warning_when_all_columns_exist(self, temp_hive_data):
+        """Test no warning when all requested columns exist."""
+        import warnings
+        
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Request only existing columns - should not warn
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # Turn warnings into errors
+            # This will raise if any warning is issued
+            ts_data = ds.get_timeseries(columns=["streamflow", "temperature"]).collect()
+            attrs = ds.get_static_attributes(columns=["area", "elevation"]).collect()
+        
+        # Verify data was retrieved correctly
+        assert "streamflow" in ts_data.columns
+        assert "temperature" in ts_data.columns
+        assert "area" in attrs.columns
+        assert "elevation" in attrs.columns
+
+    def test_warning_with_region_filter(self, temp_hive_data):
+        """Test warning works correctly with region filtering."""
+        ds = CaravanDataSource(temp_hive_data, region="camels")
+        
+        # Request non-existent column for specific region
+        with pytest.warns(UserWarning, match="Requested timeseries columns not found in data: \\['missing'\\]"):
+            ts_data = ds.get_timeseries(columns=["missing"]).collect()
+        
+        # Verify metadata columns are still returned
+        assert "gauge_id" in ts_data.columns
+        assert "date" in ts_data.columns
+        assert "REGION_NAME" in ts_data.columns
+
+
+    def test_warning_with_empty_result(self, temp_hive_data):
+        """Test warning when columns are missing even with empty result."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        # Request non-existent columns with non-existent gauge (empty result)
+        with pytest.warns(UserWarning, match="Requested timeseries columns not found in data"):
+            ts_data = ds.get_timeseries(
+                gauge_ids=["nonexistent_gauge"],
+                columns=["missing_column"]
+            ).collect()
+        
+        assert len(ts_data) == 0  # Empty result
+        assert "missing_column" not in ts_data.columns
 
 
 class TestMultipleRegionsData:
