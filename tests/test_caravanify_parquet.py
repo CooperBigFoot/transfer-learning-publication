@@ -138,6 +138,39 @@ class TestCaravanDataSourceInit:
         assert ds.base_path == Path(temp_hive_data)
         assert isinstance(ds.base_path, Path)
 
+    def test_init_with_list_of_regions(self, temp_hive_data):
+        """Test initialization with list of regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        assert ds.base_path == Path(temp_hive_data)
+        assert ds.region == ["camels", "hysets"]
+        assert isinstance(ds._ts_glob, list)
+        assert len(ds._ts_glob) == 2
+        assert "REGION_NAME=camels" in ds._ts_glob[0]
+        assert "REGION_NAME=hysets" in ds._ts_glob[1]
+        assert isinstance(ds._attr_glob, list)
+        assert len(ds._attr_glob) == 2
+
+    def test_init_with_single_item_list(self, temp_hive_data):
+        """Test initialization with single-item list."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels"])
+        assert ds.region == ["camels"]
+        assert isinstance(ds._ts_glob, list)
+        assert len(ds._ts_glob) == 1
+        assert "REGION_NAME=camels" in ds._ts_glob[0]
+
+    def test_init_with_empty_list(self, temp_hive_data):
+        """Test initialization with empty list."""
+        ds = CaravanDataSource(temp_hive_data, region=[])
+        assert ds.region == []
+        assert ds._ts_glob == []
+        assert ds._attr_glob == []
+        assert ds._shapefile_patterns == []
+
+    def test_init_with_invalid_region_type(self, temp_hive_data):
+        """Test initialization with invalid region type."""
+        with pytest.raises(TypeError, match="region must be str, list\\[str\\], or None"):
+            CaravanDataSource(temp_hive_data, region=123)
+
 
 class TestListMethods:
     """Test listing methods."""
@@ -154,6 +187,30 @@ class TestListMethods:
         regions = ds.list_regions()
         assert regions == []
 
+    def test_list_regions_with_single_region_filter(self, temp_hive_data):
+        """Test listing regions with single region filter."""
+        ds = CaravanDataSource(temp_hive_data, region="camels")
+        regions = ds.list_regions()
+        assert regions == ["camels"]
+
+    def test_list_regions_with_list_filter(self, temp_hive_data):
+        """Test listing regions with list filter."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        regions = ds.list_regions()
+        assert regions == ["camels", "hysets"]
+
+    def test_list_regions_with_partial_list(self, temp_hive_data):
+        """Test listing regions with partial list including non-existent region."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "nonexistent"])
+        regions = ds.list_regions()
+        assert regions == ["camels"]
+
+    def test_list_regions_with_empty_list(self, temp_hive_data):
+        """Test listing regions with empty list."""
+        ds = CaravanDataSource(temp_hive_data, region=[])
+        regions = ds.list_regions()
+        assert regions == []
+
     def test_list_gauge_ids(self, temp_hive_data):
         """Test listing all gauge IDs."""
         ds = CaravanDataSource(temp_hive_data)
@@ -166,6 +223,25 @@ class TestListMethods:
         ds = CaravanDataSource(temp_hive_data, region="camels")
         gauge_ids = ds.list_gauge_ids()
         assert sorted(gauge_ids) == ["G01013500", "G01030500", "G01054200"]
+
+    def test_list_gauge_ids_with_list_of_regions(self, temp_hive_data):
+        """Test listing gauge IDs with multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        gauge_ids = ds.list_gauge_ids()
+        expected = ["02LE024", "02OA016", "G01013500", "G01030500", "G01054200"]
+        assert sorted(gauge_ids) == sorted(expected)
+
+    def test_list_gauge_ids_with_single_region_in_list(self, temp_hive_data):
+        """Test listing gauge IDs with single region in list."""
+        ds = CaravanDataSource(temp_hive_data, region=["hysets"])
+        gauge_ids = ds.list_gauge_ids()
+        assert sorted(gauge_ids) == ["02LE024", "02OA016"]
+
+    def test_list_gauge_ids_with_empty_list(self, temp_hive_data):
+        """Test listing gauge IDs with empty region list."""
+        ds = CaravanDataSource(temp_hive_data, region=[])
+        gauge_ids = ds.list_gauge_ids()
+        assert gauge_ids == []
 
     def test_list_timeseries_variables(self, temp_hive_data):
         """Test listing timeseries variables."""
@@ -463,6 +539,85 @@ class TestErrorHandling:
         assert len(ts_data) == 25  # 5 gauges * 5 days
 
 
+class TestMultipleRegionsData:
+    """Test data retrieval with multiple regions."""
+
+    def test_get_timeseries_with_list_of_regions(self, temp_hive_data):
+        """Test getting timeseries from multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        ts_data = ds.get_timeseries().collect()
+        
+        # Should get data from both regions
+        assert len(ts_data) == 50  # 5 gauges * 10 days
+        assert set(ts_data["REGION_NAME"].unique()) == {"camels", "hysets"}
+        
+        # Check we have gauges from both regions
+        gauge_ids = set(ts_data["gauge_id"].unique())
+        assert "G01013500" in gauge_ids  # From camels
+        assert "02LE024" in gauge_ids    # From hysets
+
+    def test_get_timeseries_with_single_region_in_list(self, temp_hive_data):
+        """Test getting timeseries with single region in list."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels"])
+        ts_data = ds.get_timeseries().collect()
+        
+        assert len(ts_data) == 30  # 3 gauges * 10 days
+        assert ts_data["REGION_NAME"].unique()[0] == "camels"
+
+    def test_get_timeseries_with_empty_list(self, temp_hive_data):
+        """Test getting timeseries with empty region list."""
+        ds = CaravanDataSource(temp_hive_data, region=[])
+        ts_data = ds.get_timeseries().collect()
+        
+        assert len(ts_data) == 0
+        assert "gauge_id" in ts_data.columns
+        assert "date" in ts_data.columns
+
+    def test_get_static_attributes_with_list_of_regions(self, temp_hive_data):
+        """Test getting attributes from multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        attrs = ds.get_static_attributes().collect()
+        
+        assert len(attrs) == 5  # 3 from camels + 2 from hysets
+        assert set(attrs["REGION_NAME"].unique()) == {"camels", "hysets"}
+
+    def test_get_date_ranges_with_list_of_regions(self, temp_hive_data):
+        """Test getting date ranges from multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        date_ranges = ds.get_date_ranges().collect()
+        
+        assert len(date_ranges) == 5  # All gauges
+        assert set(date_ranges["REGION_NAME"].unique()) == {"camels", "hysets"}
+
+    def test_filter_gauge_ids_across_regions(self, temp_hive_data):
+        """Test filtering gauge IDs works across multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        
+        # Get data for specific gauges from different regions
+        gauge_ids = ["G01013500", "02LE024"]  # One from each region
+        ts_data = ds.get_timeseries(gauge_ids=gauge_ids).collect()
+        
+        assert len(ts_data) == 20  # 2 gauges * 10 days
+        assert set(ts_data["gauge_id"].unique()) == set(gauge_ids)
+
+    def test_list_timeseries_variables_with_multiple_regions(self, temp_hive_data):
+        """Test listing variables with multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        variables = ds.list_timeseries_variables()
+        
+        # Both regions have the same variables in test data
+        assert sorted(variables) == ["precipitation", "streamflow", "temperature"]
+
+    def test_list_static_attributes_with_multiple_regions(self, temp_hive_data):
+        """Test listing attributes with multiple regions."""
+        ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
+        attributes = ds.list_static_attributes()
+        
+        # Both regions have the same attributes in test data
+        expected = ["area", "elevation", "forest_cover", "slope", "urban_area"]
+        assert sorted(attributes) == sorted(expected)
+
+
 class TestPartitionPruning:
     """Test that partition pruning is working efficiently."""
 
@@ -498,6 +653,48 @@ class TestPartitionPruning:
         ts_data = ds.get_timeseries(date_range=("2020-01-01", "2020-01-01")).collect()
         assert len(ts_data) == 5  # 5 gauges * 1 day
         assert ts_data["date"].unique()[0] == date(2020, 1, 1)
+
+
+class TestMultipleRegionsErrorHandling:
+    """Test error handling with multiple regions."""
+
+    def test_write_timeseries_with_list_of_regions_error(self, tmp_path):
+        """Test that writing timeseries with list of regions raises error."""
+        ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
+        
+        df = pl.DataFrame({
+            "gauge_id": ["G001"],
+            "date": ["2020-01-01"],
+            "streamflow": [10.5],
+        })
+        
+        with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
+            ds.write_timeseries(df, tmp_path)
+
+    def test_write_static_attributes_with_list_of_regions_error(self, tmp_path):
+        """Test that writing attributes with list of regions raises error."""
+        ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
+        
+        df = pl.DataFrame({
+            "gauge_id": ["G001"],
+            "area": [100.5],
+        })
+        
+        with pytest.raises(ValueError, match="Cannot write attributes with multiple regions"):
+            ds.write_static_attributes(df, tmp_path)
+
+    def test_write_with_empty_list_error(self, tmp_path):
+        """Test that writing with empty region list raises error."""
+        ds = CaravanDataSource(tmp_path, region=[])
+        
+        df = pl.DataFrame({
+            "gauge_id": ["G001"],
+            "date": ["2020-01-01"],
+            "streamflow": [10.5],
+        })
+        
+        with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
+            ds.write_timeseries(df, tmp_path)
 
 
 class TestWriteTimeseries:

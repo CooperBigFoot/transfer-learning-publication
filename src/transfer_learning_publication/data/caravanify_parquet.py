@@ -6,7 +6,6 @@ import polars as pl
 
 from ..containers import StaticAttributeCollection, TimeSeriesCollection
 
-
 class CaravanDataSource:
     """
     Lazy data access for Caravan datasets using Polars and hive partitioning.
@@ -15,38 +14,81 @@ class CaravanDataSource:
     filtering at the file level without reading data.
     """
 
-    def __init__(self, base_path: str | Path, region: str | None = None):
+    def __init__(self, base_path: str | Path, region: str | list[str] | None = None):
         """
         Initialize CaravanDataSource.
 
         Args:
             base_path: Root directory containing hive-partitioned data
-            region: Optional specific region name (e.g., 'camels').
-                   If None, all regions are accessible.
+            region: Optional region specification:
+                   - str: Single region name (e.g., 'camels')
+                   - list[str]: Multiple region names (e.g., ['camels', 'hysets'])
+                   - None: All regions are accessible
         """
         self.base_path = Path(base_path)
         self.region = region
 
         # Build glob patterns for reuse
-        region_pattern = f"REGION_NAME={region}" if region else "REGION_NAME=*"
-
-        self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
-        # Attributes are now in a single merged file
-        self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
-
-        # For shapefiles, we need a slightly different approach
-        self._shapefile_pattern = self.base_path / region_pattern / "data_type=shapefiles"
+        if region is None:
+            # Access all regions
+            region_pattern = "REGION_NAME=*"
+            self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+            self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
+            self._shapefile_patterns = [self.base_path / region_pattern / "data_type=shapefiles"]
+        elif isinstance(region, str):
+            # Single region
+            region_pattern = f"REGION_NAME={region}"
+            self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+            self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
+            self._shapefile_patterns = [self.base_path / region_pattern / "data_type=shapefiles"]
+        elif isinstance(region, list):
+            # Multiple regions - create list of glob patterns
+            if not region:
+                # Empty list - no data accessible
+                self._ts_glob = []
+                self._attr_glob = []
+                self._shapefile_patterns = []
+            else:
+                # Create glob patterns for each region
+                self._ts_glob = [
+                    str(self.base_path / f"REGION_NAME={r}" / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+                    for r in region
+                ]
+                self._attr_glob = [
+                    str(self.base_path / f"REGION_NAME={r}" / "data_type=attributes" / "data.parquet")
+                    for r in region
+                ]
+                self._shapefile_patterns = [
+                    self.base_path / f"REGION_NAME={r}" / "data_type=shapefiles"
+                    for r in region
+                ]
+        else:
+            raise TypeError(f"region must be str, list[str], or None, got {type(region)}")
 
     def list_regions(self) -> list[str]:
         """
-        List all available regions using filesystem glob.
+        List available regions based on the region filter.
 
         Returns:
-            List of region names
+            List of region names (filtered if region was specified during init)
         """
-        region_dirs = self.base_path.glob("REGION_NAME=*")
-        regions = [d.name.split("=")[1] for d in region_dirs if d.is_dir()]
-        return sorted(regions)
+        if isinstance(self.region, str):
+            # Single region specified - return it if it exists
+            region_path = self.base_path / f"REGION_NAME={self.region}"
+            return [self.region] if region_path.exists() else []
+        elif isinstance(self.region, list):
+            # Multiple regions specified - return those that exist
+            existing_regions = []
+            for r in self.region:
+                region_path = self.base_path / f"REGION_NAME={r}"
+                if region_path.exists():
+                    existing_regions.append(r)
+            return sorted(existing_regions)
+        else:
+            # No filter - list all available regions
+            region_dirs = self.base_path.glob("REGION_NAME=*")
+            regions = [d.name.split("=")[1] for d in region_dirs if d.is_dir()]
+            return sorted(regions)
 
     def list_gauge_ids(self) -> list[str]:
         """
@@ -55,6 +97,10 @@ class CaravanDataSource:
         Returns:
             List of unique gauge IDs
         """
+        if isinstance(self._ts_glob, list) and not self._ts_glob:
+            # Empty list - no data
+            return []
+            
         try:
             # Use union_by_name to handle schema differences
             lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
@@ -65,9 +111,17 @@ class CaravanDataSource:
             return sorted(gauge_ids)
         except Exception:
             # Fallback to filesystem if scan fails
-            gauge_dirs = Path(self._ts_glob).parent.glob("gauge_id=*")
-            gauge_ids = [d.name.split("=")[1] for d in gauge_dirs if d.is_dir()]
-            return sorted(gauge_ids)
+            if isinstance(self._ts_glob, list):
+                # Multiple patterns - gather from all
+                all_gauge_ids = set()
+                for glob_pattern in self._ts_glob:
+                    gauge_dirs = Path(glob_pattern).parent.glob("gauge_id=*")
+                    all_gauge_ids.update(d.name.split("=")[1] for d in gauge_dirs if d.is_dir())
+                return sorted(all_gauge_ids)
+            else:
+                gauge_dirs = Path(self._ts_glob).parent.glob("gauge_id=*")
+                gauge_ids = [d.name.split("=")[1] for d in gauge_dirs if d.is_dir()]
+                return sorted(gauge_ids)
 
     def list_timeseries_variables(self) -> list[str]:
         """
@@ -76,6 +130,10 @@ class CaravanDataSource:
         Returns:
             List of variable names (excluding metadata columns)
         """
+        if isinstance(self._ts_glob, list) and not self._ts_glob:
+            # Empty list - no data
+            return []
+            
         try:
             lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
             schema = lf.collect_schema()
@@ -95,6 +153,10 @@ class CaravanDataSource:
         Returns:
             List of attribute column names
         """
+        if isinstance(self._attr_glob, list) and not self._attr_glob:
+            # Empty list - no data
+            return []
+            
         try:
             lf = pl.scan_parquet(self._attr_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
             schema = lf.collect_schema()
@@ -117,6 +179,15 @@ class CaravanDataSource:
         Returns:
             LazyFrame with columns: REGION_NAME, gauge_id, min_date, max_date
         """
+        if isinstance(self._ts_glob, list) and not self._ts_glob:
+            # Empty list - return empty LazyFrame
+            return pl.DataFrame({
+                "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                "gauge_id": pl.Series([], dtype=pl.Utf8),
+                "min_date": pl.Series([], dtype=pl.Date),
+                "max_date": pl.Series([], dtype=pl.Date),
+            }).lazy()
+            
         lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
         # Handle date dtype normalization if stored as string
@@ -152,6 +223,18 @@ class CaravanDataSource:
         Returns:
             LazyFrame with timeseries data
         """
+        if isinstance(self._ts_glob, list) and not self._ts_glob:
+            # Empty list - return empty LazyFrame
+            empty_df = pl.DataFrame({
+                "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                "gauge_id": pl.Series([], dtype=pl.Utf8),
+                "date": pl.Series([], dtype=pl.Date),
+            })
+            if columns:
+                for col in columns:
+                    empty_df = empty_df.with_columns(pl.lit(None).alias(col))
+            return empty_df.lazy()
+            
         lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
         # Handle date dtype normalization if stored as string
@@ -199,10 +282,29 @@ class CaravanDataSource:
         Returns:
             LazyFrame with static attributes
         """
+        if isinstance(self._attr_glob, list) and not self._attr_glob:
+            # Empty list - return empty LazyFrame
+            empty_df = pl.DataFrame(
+                {
+                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                    "gauge_id": pl.Series([], dtype=pl.Utf8),
+                }
+            )
+            if columns:
+                for col in columns:
+                    empty_df = empty_df.with_columns(pl.lit(None).alias(col))
+            return empty_df.lazy()
+            
         # Check if files exist first
         from glob import glob
 
-        files = glob(self._attr_glob)
+        if isinstance(self._attr_glob, list):
+            files = []
+            for pattern in self._attr_glob:
+                files.extend(glob(pattern))
+        else:
+            files = glob(self._attr_glob)
+            
         if not files:
             # Return empty LazyFrame with expected schema when no files found
             empty_df = pl.DataFrame(
@@ -242,40 +344,54 @@ class CaravanDataSource:
         Returns:
             GeoDataFrame with watershed geometries
         """
-        # For shapefiles, we need to handle differently since they're not partitioned
-        if self.region:
-            shapefile_path = self._shapefile_pattern / f"{self.region}_shapes.shp"
+        gdfs = []
+        
+        if isinstance(self.region, str):
+            # Single region
+            shapefile_path = self._shapefile_patterns[0] / f"{self.region}_shapes.shp"
             if not shapefile_path.exists():
                 raise FileNotFoundError(f"Shapefile not found: {shapefile_path}")
 
             gdf = gpd.read_file(shapefile_path)
-
-            if gauge_ids:
-                # Assuming shapefile has a gauge_id column
-                gdf = gdf[gdf["gauge_id"].isin(gauge_ids)]
-
-            return gdf
-        else:
-            # If no region specified, need to load from all regions
-            gdfs = []
-            for region_dir in self._shapefile_pattern.parent.glob("REGION_NAME=*"):
-                region_name = region_dir.name.split("=")[1]
-                shapefile_path = region_dir / "data_type=shapefiles" / f"{region_name}_shapes.shp"
-
+            gdf["REGION_NAME"] = self.region  # Add region column for consistency
+            gdfs.append(gdf)
+            
+        elif isinstance(self.region, list):
+            # Multiple regions specified
+            if not self.region:
+                # Empty list
+                raise FileNotFoundError("No regions specified")
+                
+            for region_name in self.region:
+                shapefile_path = self.base_path / f"REGION_NAME={region_name}" / "data_type=shapefiles" / f"{region_name}_shapes.shp"
                 if shapefile_path.exists():
                     gdf = gpd.read_file(shapefile_path)
-                    gdf["REGION_NAME"] = region_name  # Add region column
+                    gdf["REGION_NAME"] = region_name
                     gdfs.append(gdf)
+                    
+        else:
+            # No region specified - load all available
+            for pattern in self._shapefile_patterns:
+                for region_dir in pattern.parent.glob("REGION_NAME=*"):
+                    region_name = region_dir.name.split("=")[1]
+                    shapefile_path = region_dir / "data_type=shapefiles" / f"{region_name}_shapes.shp"
+                    
+                    if shapefile_path.exists():
+                        gdf = gpd.read_file(shapefile_path)
+                        gdf["REGION_NAME"] = region_name
+                        gdfs.append(gdf)
 
-            if not gdfs:
-                raise FileNotFoundError("No shapefiles found")
+        if not gdfs:
+            raise FileNotFoundError("No shapefiles found")
 
-            combined_gdf = pd.concat(gdfs, ignore_index=True)
+        # Combine all GeoDataFrames
+        combined_gdf = pd.concat(gdfs, ignore_index=True) if len(gdfs) > 1 else gdfs[0]
 
-            if gauge_ids:
-                combined_gdf = combined_gdf[combined_gdf["gauge_id"].isin(gauge_ids)]
+        # Apply gauge filter if specified
+        if gauge_ids:
+            combined_gdf = combined_gdf[combined_gdf["gauge_id"].isin(gauge_ids)]
 
-            return combined_gdf
+        return combined_gdf
 
     def write_timeseries(
         self, df: pl.DataFrame | pl.LazyFrame, output_base_path: str | Path, overwrite: bool = False
@@ -297,9 +413,11 @@ class CaravanDataSource:
 
         logger = logging.getLogger(__name__)
 
-        # Validate region is set
+        # Validate region is set and is a single string
         if self.region is None:
             raise ValueError("Region must be set to write timeseries. Initialize with a specific region.")
+        if isinstance(self.region, list):
+            raise ValueError("Cannot write timeseries with multiple regions. Initialize with a single region string.")
 
         # Convert LazyFrame to DataFrame if needed
         if isinstance(df, pl.LazyFrame):
@@ -374,9 +492,11 @@ class CaravanDataSource:
 
         logger = logging.getLogger(__name__)
 
-        # Validate region is set
+        # Validate region is set and is a single string
         if self.region is None:
             raise ValueError("Region must be set to write attributes. Initialize with a specific region.")
+        if isinstance(self.region, list):
+            raise ValueError("Cannot write attributes with multiple regions. Initialize with a single region string.")
 
         # Convert LazyFrame to DataFrame if needed
         if isinstance(df, pl.LazyFrame):
