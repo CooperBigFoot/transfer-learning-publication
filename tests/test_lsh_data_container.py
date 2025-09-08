@@ -323,9 +323,9 @@ class TestLSHDataContainer:
             input_length=20,
             output_length=10,
             target_name="temperature",
-            forcing_features=["temperature", "precipitation", "humidity"],
+            forcing_features=["precipitation", "humidity"],  # Remove temperature since is_autoregressive=False
             static_features=["elevation", "latitude", "longitude"],
-            forcing_indices=[0, 1, 2, 5],  # Include 5 so subset check passes
+            forcing_indices=[1, 2, 5],  # Include 5 so subset check passes, indices for non-target features
             future_indices=[1, 5],  # 5 is out of bounds for actual data
             is_autoregressive=False,  # Disable to avoid target check
         )

@@ -273,6 +273,118 @@ class TestCompositePipeline:
         assert summary[1]["transforms"] == ["ZScore"]
         assert summary[1]["columns"] == ["precipitation"]
 
+    def test_inverse_transform_with_zero_filled_missing_columns(self, sample_dataframe):
+        """Test inverse transform works when missing columns are zero-filled."""
+        # Create pipeline that transforms both streamflow and precipitation with ZScore
+        steps = [
+            CompositePipelineStep(
+                pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"]
+            ),
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Fit and transform full data
+        pipeline.fit(sample_dataframe)
+        transformed_df = pipeline.transform(sample_dataframe)
+
+        # Simulate having only streamflow column (drop precipitation)
+        streamflow_only = transformed_df.select(["basin_id", "streamflow", "temperature", "other_col"])
+
+        # Add zero-filled precipitation column
+        streamflow_with_zeros = streamflow_only.with_columns(pl.lit(0.0).alias("precipitation"))
+
+        # Inverse transform should work now
+        inverse_df = pipeline.inverse_transform(streamflow_with_zeros)
+
+        # Streamflow should be recovered correctly
+        original_streamflow = sample_dataframe["streamflow"].to_numpy()
+        recovered_streamflow = inverse_df["streamflow"].to_numpy()
+        np.testing.assert_allclose(recovered_streamflow, original_streamflow, rtol=1e-10)
+
+        # Precipitation should be the mean value (since we filled with zeros)
+        original_precipitation = sample_dataframe["precipitation"].to_numpy()
+        mean_precipitation = np.mean(original_precipitation)
+        recovered_precipitation = inverse_df["precipitation"].to_numpy()
+        np.testing.assert_allclose(recovered_precipitation, mean_precipitation, rtol=1e-10)
+
+    def test_partial_inverse_transform_streamflow_only(self, sample_dataframe):
+        """Test the exact use case: fit on both columns, inverse transform only streamflow."""
+        # Exact pipeline from user's example
+        steps = [
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
+            CompositePipelineStep(
+                pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"]
+            ),
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Fit and transform full data
+        transformed_df = pipeline.fit_transform(sample_dataframe)
+
+        # Create DataFrame with only streamflow (simulating user's case)
+        streamflow_only = transformed_df.select(["basin_id", "streamflow"])
+
+        # Add zero-filled precipitation for the workaround
+        streamflow_with_zeros = streamflow_only.with_columns(pl.lit(0.0).alias("precipitation"))
+
+        # Add back other columns that might be expected
+        streamflow_with_zeros = streamflow_with_zeros.with_columns(
+            [
+                pl.lit(sample_dataframe["temperature"][0]).alias("temperature"),
+                pl.lit(sample_dataframe["other_col"][0]).alias("other_col"),
+            ]
+        )
+
+        # Inverse transform should work
+        inverse_df = pipeline.inverse_transform(streamflow_with_zeros)
+
+        # Verify streamflow is correctly recovered
+        original_streamflow = sample_dataframe["streamflow"].to_numpy()
+        recovered_streamflow = inverse_df["streamflow"].to_numpy()
+        np.testing.assert_allclose(recovered_streamflow, original_streamflow, rtol=1e-10)
+
+        # Precipitation should be at mean value
+        mean_precip = np.mean(sample_dataframe["precipitation"].to_numpy())
+        recovered_precip = inverse_df["precipitation"].to_numpy()
+        np.testing.assert_allclose(recovered_precip, mean_precip, rtol=1e-10)
+
+    def test_zero_filled_columns_recover_to_mean(self, sample_dataframe):
+        """Test that zero-filled columns recover to their training mean after inverse ZScore."""
+        # Use global ZScore on multiple columns
+        steps = [
+            CompositePipelineStep(
+                pipeline_type="global", 
+                transforms=[ZScore()], 
+                columns=["streamflow", "precipitation", "temperature"]
+            ),
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Fit pipeline and calculate means
+        pipeline.fit(sample_dataframe)
+        streamflow_mean = sample_dataframe["streamflow"].mean()
+        precip_mean = sample_dataframe["precipitation"].mean()
+        temp_mean = sample_dataframe["temperature"].mean()
+
+        # Create DataFrame with all zeros in normalized space
+        zero_filled_df = pl.DataFrame(
+            {
+                "basin_id": sample_dataframe["basin_id"],
+                "streamflow": [0.0] * len(sample_dataframe),
+                "precipitation": [0.0] * len(sample_dataframe),
+                "temperature": [0.0] * len(sample_dataframe),
+                "other_col": sample_dataframe["other_col"],
+            }
+        )
+
+        # Inverse transform zeros
+        inverse_df = pipeline.inverse_transform(zero_filled_df)
+
+        # All values should be at their respective means
+        np.testing.assert_allclose(inverse_df["streamflow"].to_numpy(), streamflow_mean, rtol=1e-10)
+        np.testing.assert_allclose(inverse_df["precipitation"].to_numpy(), precip_mean, rtol=1e-10)
+        np.testing.assert_allclose(inverse_df["temperature"].to_numpy(), temp_mean, rtol=1e-10)
+
 
 class TestCompositePipelineJoblib:
     """Test joblib serialization/deserialization of CompositePipeline."""

@@ -451,15 +451,15 @@ class TestLSHDataset:
             input_length=10,
             output_length=5,
             target_name="temperature",
-            forcing_features=["temperature", "precipitation", "humidity"],
+            forcing_features=["precipitation", "humidity"],  # Remove temperature since is_autoregressive=False
             static_features=["elevation", "latitude"],
             target_idx=0,
-            forcing_indices=[0, 1, 2],
-            future_indices=[0, 1, 2],  # Includes target, but OK since not autoregressive
+            forcing_indices=[1, 2],  # Indices for precipitation and humidity
+            future_indices=[1, 2],  # Future values for precipitation and humidity
             input_feature_indices=[1, 2],  # Excludes target (non-autoregressive)
             is_autoregressive=False,  # Not using past target values
             include_dates=False,
         )
         # Should not raise an error
         assert config.target_idx == 0
-        assert 0 in config.future_indices
+        assert config.is_autoregressive is False
