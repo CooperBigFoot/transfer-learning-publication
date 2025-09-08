@@ -218,3 +218,227 @@ class TestLSHDataContainer:
         assert len(container.time_series) == 0
         assert len(container.static_attributes) == 0
         assert container.sequence_index.n_groups == 0
+
+    def test_config_output_length_mismatch(self, valid_components):
+        """Test that config with wrong output_length raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        # Create config with wrong output_length
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=15,  # Wrong: sequence_index has output_length=10
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Config output_length \(15\) doesn't match sequence index \(10\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+    def test_target_index_out_of_bounds(self, valid_components):
+        """Test that target_idx out of bounds raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        # Config with target_idx out of bounds (only 3 features)
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            target_idx=5,  # Out of bounds: only have indices 0, 1, 2
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Target index 5 out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+    def test_forcing_indices_out_of_bounds(self, valid_components):
+        """Test that forcing_indices out of bounds raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            forcing_indices=[0, 1, 3, 4],  # 3 and 4 are out of bounds
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Forcing indices \[3, 4\] out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+    def test_future_indices_out_of_bounds(self, valid_components):
+        """Test that future_indices out of bounds raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        # First test forcing indices out of bounds
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            forcing_indices=[0, 1, 2, 10],  # 10 is out of bounds
+            future_indices=[1, 2],  # Valid subset of forcing
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Forcing indices \[10\] out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+        # Now test future indices specifically (with valid forcing)
+        wrong_config2 = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            forcing_indices=[0, 1, 2, 5],  # Include 5 so subset check passes
+            future_indices=[1, 5],  # 5 is out of bounds for actual data
+            is_autoregressive=False,  # Disable to avoid target check
+        )
+
+        # Forcing indices will be checked first since 5 is out of bounds
+        with pytest.raises(
+            ValueError,
+            match=r"Forcing indices \[5\] out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config2,
+            )
+
+    def test_input_feature_indices_out_of_bounds(self, valid_components):
+        """Test that input_feature_indices out of bounds raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            input_feature_indices=[0, 1, 2, 5],  # 5 is out of bounds
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Input feature indices \[5\] out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+    def test_static_features_count_mismatch(self, valid_components):
+        """Test that mismatch in static feature count raises error."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        # Config expects 2 static features but collection has 3
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude"],  # Missing longitude
+        )
+
+        with pytest.raises(
+            ValueError,
+            match="Config has 2 static features, but static_attributes has 3",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
+
+    def test_valid_indices_at_boundaries(self, valid_components):
+        """Test that indices at valid boundaries work correctly."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        # All indices at valid boundaries
+        config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            target_idx=0,  # First index as target
+            forcing_indices=[0, 1, 2],  # All valid
+            future_indices=[1, 2],  # Valid subset, excluding target
+            input_feature_indices=[0, 1, 2],  # All features
+        )
+
+        # Should create successfully
+        container = LSHDataContainer(
+            time_series=time_series,
+            static_attributes=static_attributes,
+            sequence_index=sequence_index,
+            config=config,
+        )
+
+        assert container.config.target_idx == 0
+        assert container.config.forcing_indices == [0, 1, 2]
+        assert container.config.future_indices == [1, 2]
+
+    def test_negative_indices_invalid(self, valid_components):
+        """Test that negative indices are rejected."""
+        time_series, static_attributes, sequence_index, _ = valid_components
+
+        wrong_config = DatasetConfig(
+            input_length=20,
+            output_length=10,
+            target_name="temperature",
+            forcing_features=["temperature", "precipitation", "humidity"],
+            static_features=["elevation", "latitude", "longitude"],
+            target_idx=-1,  # Negative index
+        )
+
+        with pytest.raises(
+            ValueError,
+            match=r"Target index -1 out of bounds \[0, 3\)",
+        ):
+            LSHDataContainer(
+                time_series=time_series,
+                static_attributes=static_attributes,
+                sequence_index=sequence_index,
+                config=wrong_config,
+            )
