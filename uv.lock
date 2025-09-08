@@ -1646,10 +1646,12 @@ source = { editable = "." }
 dependencies = [
     { name = "geopandas" },
     { name = "ipykernel" },
+    { name = "joblib" },
     { name = "lightning" },
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
+    { name = "pyyaml" },
     { name = "scikit-learn" },
     { name = "torch" },
 ]
@@ -1665,10 +1667,12 @@ dev = [
 requires-dist = [
     { name = "geopandas", specifier = ">=1.1.1" },
     { name = "ipykernel", specifier = ">=6.30.1" },
+    { name = "joblib", specifier = ">=1.5.2" },
     { name = "lightning", specifier = ">=2.5.5" },
     { name = "pandas", specifier = ">=2.3.2" },
     { name = "polars", specifier = ">=1.15.0" },
     { name = "pyarrow", specifier = ">=21.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "scikit-learn", specifier = ">=1.7.1" },
     { name = "torch", specifier = ">=2.8.0" },
 ]

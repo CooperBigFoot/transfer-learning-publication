@@ -1,0 +1,116 @@
+# Example configuration for TimeSeriesDataModule
+# This file demonstrates all available configuration options
+
+# Data configuration
+data:
+  # Root directory containing processed, hive-partitioned data
+  # Expected structure: base_path/{train,val,test}/REGION_NAME=.../data_type=.../...
+  base_path: "/path/to/processed/data"
+  
+  # Region to load data from
+  # Can be a single region name (e.g., "camels") or a list (e.g., ["camels", "hysets"])
+  region: "camels"
+  
+  # Optional: Path to fitted preprocessing pipeline for inverse transforms
+  # Used to transform predictions back to original scale
+  pipeline_path: "/path/to/fitted_pipeline.joblib"  # Optional
+
+# Feature configuration
+features:
+  # Forcing features: Time-varying input features
+  # These should match column names in your processed data
+  forcing:
+    - "streamflow"
+    - "total_precipitation_sum"
+    - "temperature_2m_mean"
+    - "temperature_2m_min"
+    - "temperature_2m_max"
+    - "shortwave_radiation_sum"
+    - "potential_evaporation_sum"
+  
+  # Static features: Time-invariant attributes
+  # These should match column names in your static attributes data
+  static:
+    - "area"
+    - "high_prec_freq"
+    - "elev_mean"
+    - "slope_mean"
+    - "forest_frac"
+    - "lai_max"
+    - "soil_depth_pelletier"
+  
+  # Future features: Known future covariates (optional)
+  # Must be a subset of forcing features
+  # These are features known at prediction time (e.g., weather forecasts)
+  future: []  # Empty list means no future features
+  # Example with future features:
+  # future:
+  #   - "temperature_2m_mean"
+  #   - "shortwave_radiation_sum"
+  
+  # Target variable: The feature to predict
+  # Must be one of the forcing features
+  target: "streamflow"
+
+# Sequence configuration
+sequence:
+  # Length of input sequences (lookback window)
+  input_length: 365
+  
+  # Length of output sequences (prediction horizon)
+  output_length: 1
+  # For multi-step ahead forecasting:
+  # output_length: 7  # Predict 7 days ahead
+
+# Model configuration
+model:
+  # Whether the model is autoregressive
+  # true: Target is included in input features (for next-step prediction)
+  # false: Target is excluded from input features (for direct prediction)
+  is_autoregressive: true
+  
+  # Whether to include date information
+  # If true, includes input_end_date timestamp in samples
+  include_dates: false
+
+# DataLoader configuration
+dataloader:
+  # Batch size for training/validation/testing
+  batch_size: 32
+  
+  # Number of worker processes for data loading
+  # 0 means data is loaded in the main process
+  num_workers: 4
+  
+  # Whether to pin memory for GPU transfer
+  # Set to true when using GPU for faster data transfer
+  pin_memory: true
+  
+  # Whether to keep workers alive between epochs
+  # Only applies when num_workers > 0
+  persistent_workers: true
+  
+  # Whether to shuffle training data
+  # Validation and test data are never shuffled
+  shuffle_train: true
+
+# Alternative minimal configuration example:
+# ---
+# data:
+#   base_path: "/data/processed"
+#   region: "camels"
+# 
+# features:
+#   forcing: ["streamflow", "precipitation", "temperature"]
+#   static: ["area", "elevation"]
+#   target: "streamflow"
+# 
+# sequence:
+#   input_length: 365
+#   output_length: 1
+# 
+# model:
+#   is_autoregressive: true
+# 
+# dataloader:
+#   batch_size: 32
