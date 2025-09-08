@@ -10,11 +10,11 @@ from torch.utils.data import DataLoader
 
 from transfer_learning_publication.containers import DatasetConfig, LSHDataContainer, SequenceIndex
 from transfer_learning_publication.contracts import Batch
-from transfer_learning_publication.data import TimeSeriesDataModule
+from transfer_learning_publication.data import LSHDataModule
 
 
-class TestTimeSeriesDataModule:
-    """Tests for TimeSeriesDataModule class."""
+class TestLSHDataModule:
+    """Tests for LSHDataModule class."""
 
     def test_init_with_valid_config(self, tmp_path):
         """Test initialization with valid configuration file."""
@@ -36,7 +36,7 @@ class TestTimeSeriesDataModule:
             yaml.dump(config, f)
 
         # Initialize datamodule
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         assert dm.config == config
         assert dm.train_dataset is None
@@ -48,7 +48,7 @@ class TestTimeSeriesDataModule:
         config_path = tmp_path / "missing.yaml"
 
         with pytest.raises(FileNotFoundError, match="Configuration file not found"):
-            TimeSeriesDataModule(config_path)
+            LSHDataModule(config_path)
 
     def test_config_validation_missing_sections(self, tmp_path):
         """Test configuration validation for missing required sections."""
@@ -65,7 +65,7 @@ class TestTimeSeriesDataModule:
             yaml.dump(config, f)
 
         with pytest.raises(ValueError, match="Missing required config section: data"):
-            TimeSeriesDataModule(config_path)
+            LSHDataModule(config_path)
 
     def test_config_validation_missing_keys(self, tmp_path):
         """Test configuration validation for missing required keys."""
@@ -83,7 +83,7 @@ class TestTimeSeriesDataModule:
             yaml.dump(config, f)
 
         with pytest.raises(ValueError, match="Missing required config: data.base_path"):
-            TimeSeriesDataModule(config_path)
+            LSHDataModule(config_path)
 
     def test_build_dataset_config_autoregressive(self, tmp_path):
         """Test _build_dataset_config for autoregressive mode."""
@@ -105,7 +105,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         # Test dataset config generation
         feature_names = ["streamflow", "precipitation", "temperature"]
@@ -142,7 +142,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         # This should raise an error because target is in forcing for non-autoregressive
         feature_names = ["streamflow", "precipitation", "temperature"]
@@ -167,7 +167,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         feature_names = ["precipitation", "temperature"]
         with pytest.raises(ValueError, match="Target 'streamflow' not found in features"):
@@ -226,7 +226,7 @@ class TestTimeSeriesDataModule:
         mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
 
         # Initialize datamodule
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         # Test container building
         with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
@@ -258,13 +258,13 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         with pytest.raises(FileNotFoundError, match="Data path not found for split 'train'"):
             dm._build_container("train")
 
     @patch("transfer_learning_publication.data.timeseries_datamodule.LSHDataset")
-    @patch.object(TimeSeriesDataModule, "_build_container")
+    @patch.object(LSHDataModule, "_build_container")
     def test_setup_fit_stage(self, mock_build_container, mock_dataset_class, tmp_path):
         """Test setup method for fit stage."""
         config = {
@@ -291,7 +291,7 @@ class TestTimeSeriesDataModule:
         mock_dataset.__len__.return_value = 100
         mock_dataset_class.return_value = mock_dataset
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         # Test setup for fit stage
         dm.setup(stage="fit")
@@ -325,7 +325,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         # Mock datasets with __len__ method
         dm.train_dataset = MagicMock()
@@ -370,7 +370,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         with pytest.raises(RuntimeError, match="setup\\(\\) must be called"):
             dm.train_dataloader()
@@ -394,7 +394,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         assert dm.num_features == 3
         assert dm.num_static_features == 2
@@ -432,7 +432,7 @@ class TestTimeSeriesDataModule:
         mock_pipeline.inverse_transform_target.return_value = torch.tensor([1.0, 2.0])
         mock_joblib_load.return_value = mock_pipeline
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         predictions = torch.tensor([0.5, 1.5])
         result = dm.inverse_transform(predictions)
@@ -459,7 +459,7 @@ class TestTimeSeriesDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        dm = TimeSeriesDataModule(config_path)
+        dm = LSHDataModule(config_path)
 
         predictions = torch.tensor([0.5, 1.5])
         with pytest.raises(ValueError, match="No pipeline path configured"):

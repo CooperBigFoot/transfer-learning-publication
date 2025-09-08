@@ -27,7 +27,8 @@
       "Read(/Users/cooper/Desktop/data_to_hive/timeseries/csv/**)",
       "WebSearch",
       "Bash(uv add:*)",
-      "Bash(sed:*)"
+      "Bash(sed:*)",
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/data_type=timeseries/**)"
     ],
     "deny": [],
     "ask": []

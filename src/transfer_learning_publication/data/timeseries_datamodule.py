@@ -17,8 +17,8 @@ from .lsh_dataset import LSHDataset
 
 logger = logging.getLogger(__name__)
 
-
-class TimeSeriesDataModule(LightningDataModule):
+# TODO: I want to be able to control the random see
+class LSHDataModule(LightningDataModule):
     """
     PyTorch Lightning DataModule for time series forecasting.
 
@@ -61,7 +61,7 @@ class TimeSeriesDataModule(LightningDataModule):
         self._pipeline = None
         self._pipeline_path = self.config["data"].get("pipeline_path")
 
-        logger.info(f"TimeSeriesDataModule initialized with config: {config_path}")
+        logger.info(f"LSHDataModule initialized with config: {config_path}")
 
     def _load_config(self, config_path: str | Path) -> dict[str, any]:
         """Load and validate configuration from YAML file."""
@@ -78,13 +78,11 @@ class TimeSeriesDataModule(LightningDataModule):
             if key not in config:
                 raise ValueError(f"Missing required config section: {key}")
 
-        # Validate data section
         if "base_path" not in config["data"]:
             raise ValueError("Missing required config: data.base_path")
         if "region" not in config["data"]:
             raise ValueError("Missing required config: data.region")
 
-        # Validate features section
         if "forcing" not in config["features"]:
             raise ValueError("Missing required config: features.forcing")
         if "static" not in config["features"]:
@@ -92,17 +90,14 @@ class TimeSeriesDataModule(LightningDataModule):
         if "target" not in config["features"]:
             raise ValueError("Missing required config: features.target")
 
-        # Validate sequence section
         if "input_length" not in config["sequence"]:
             raise ValueError("Missing required config: sequence.input_length")
         if "output_length" not in config["sequence"]:
             raise ValueError("Missing required config: sequence.output_length")
 
-        # Validate model section
         if "is_autoregressive" not in config["model"]:
             raise ValueError("Missing required config: model.is_autoregressive")
 
-        # Validate dataloader section
         if "batch_size" not in config["dataloader"]:
             raise ValueError("Missing required config: dataloader.batch_size")
 
@@ -130,12 +125,11 @@ class TimeSeriesDataModule(LightningDataModule):
                 self.val_dataset = LSHDataset(self._val_container)
                 logger.info(f"Validation dataset ready: {len(self.val_dataset)} sequences")
 
-        if stage == "test" or stage is None:
-            if self.test_dataset is None:
-                logger.info("Building test dataset...")
-                self._test_container = self._build_container("test")
-                self.test_dataset = LSHDataset(self._test_container)
-                logger.info(f"Test dataset ready: {len(self.test_dataset)} sequences")
+        if (stage == "test" or stage is None) and self.test_dataset is None:
+            logger.info("Building test dataset...")
+            self._test_container = self._build_container("test")
+            self.test_dataset = LSHDataset(self._test_container)
+            logger.info(f"Test dataset ready: {len(self.test_dataset)} sequences")
 
     def _build_container(self, split: str) -> LSHDataContainer:
         """
