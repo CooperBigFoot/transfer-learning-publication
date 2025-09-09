@@ -132,7 +132,7 @@ class ModelFactory:
         Example:
             # Config with external hyperparameters
             model = ModelFactory.create_from_config("experiments/tide_365_10.yaml")
-            
+
             # The config file should have:
             # model:
             #   type: "tide"
@@ -142,83 +142,83 @@ class ModelFactory:
         """
         # Convert to Path if string
         config_path = Path(config_path)
-        
+
         # Check file exists
         if not config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
-        
+
         # Load experiment configuration
         with open(config_path) as f:
             experiment_config = yaml.safe_load(f)
-        
+
         # Validate model section exists
         if "model" not in experiment_config:
             raise ValueError("Missing 'model' section in configuration file")
-        
+
         model_section = experiment_config["model"]
-        
+
         # Validate model type exists
         if "type" not in model_section:
             raise ValueError("Missing 'model.type' in configuration file")
-        
+
         model_type = model_section["type"]
-        
+
         # Start with empty config dict
         config_dict = {}
-        
+
         # Load external hyperparameters if specified
         if "config_file" in model_section:
             hyperparameter_path = Path(model_section["config_file"])
-            
+
             # Handle relative paths (relative to the experiment config file)
             if not hyperparameter_path.is_absolute():
                 hyperparameter_path = config_path.parent / hyperparameter_path
-            
+
             if not hyperparameter_path.exists():
                 raise FileNotFoundError(f"Hyperparameter file not found: {hyperparameter_path}")
-            
+
             with open(hyperparameter_path) as f:
                 external_config = yaml.safe_load(f)
-                
+
             # Add external hyperparameters to config
             if external_config:
                 config_dict.update(external_config)
-        
+
         # Apply overrides if specified
         if "overrides" in model_section:
             overrides = model_section["overrides"]
             if overrides:
                 config_dict.update(overrides)
-        
+
         # Extract data-derived parameters from experiment config
         data_derived_params = _extract_config(experiment_config)
-        
+
         # Merge data-derived parameters (these should take precedence)
         # But don't overwrite model-specific parameters that were explicitly set
         for key, value in data_derived_params.items():
             if key not in config_dict:  # Only add if not already set by model config/overrides
                 config_dict[key] = value
-        
+
         # Create model using existing create method logic
         _ensure_models_registered()
-        
+
         # Validate model exists
         if model_type not in _MODELS:
             available = list(_MODELS.keys())
             raise ValueError(f"Model '{model_type}' not found in registry. Available models: {sorted(available)}")
-        
+
         # Get model and config classes
         model_class, config_class = _MODELS[model_type]
-        
+
         # Filter config_dict to only include parameters the config class accepts
         accepted_params = set(config_class.STANDARD_PARAMS + config_class.MODEL_PARAMS)
         filtered_config = {key: value for key, value in config_dict.items() if key in accepted_params}
-        
+
         # Create model instance
         model = model_class(filtered_config)
-        
+
         return model
-    
+
     @staticmethod
     def create(name: str, yaml_path: Path | str) -> BaseLitModel:
         """Create a model instance from a YAML configuration file.
@@ -243,7 +243,7 @@ class ModelFactory:
         """
         # Ensure models are registered
         _ensure_models_registered()
-        
+
         # Validate model exists
         if name not in _MODELS:
             available = list(_MODELS.keys())
@@ -307,7 +307,7 @@ class ModelFactory:
         """
         # Ensure models are registered
         _ensure_models_registered()
-        
+
         if name not in _MODELS:
             available = list(_MODELS.keys())
             raise ValueError(f"Model '{name}' not found in registry. Available models: {sorted(available)}")
@@ -318,22 +318,23 @@ class ModelFactory:
 
 def _ensure_models_registered():
     """Ensure all models are registered by importing them.
-    
+
     This function is called lazily to avoid circular imports.
     Models self-register via the @register_model decorator when imported.
     """
     global _MODELS_REGISTERED
     if _MODELS_REGISTERED:
         return
-    
+
     # Import individual models - they will self-register via decorator
     from .dummy.lightning import LitNaiveLastValue  # noqa: F401
     from .ealstm.lightning import LitEALSTM  # noqa: F401
     from .tft.lightning import LitTFT  # noqa: F401
     from .tide.lightning import LitTiDE  # noqa: F401
     from .tsmixer.lightning import LitTSMixer  # noqa: F401
-    
+
     _MODELS_REGISTERED = True
+
 
 # Note: When adding new models, remember to:
 # 1. Add the @register_model decorator to the Lightning module

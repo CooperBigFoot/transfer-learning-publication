@@ -1,11 +1,11 @@
 """Tests for TFT Lightning module."""
 
 import pytest
-import torch
 import pytorch_lightning as pl
+import torch
 
 from transfer_learning_publication.contracts import Batch, ForecastOutput
-from transfer_learning_publication.models.tft import TFTConfig, TemporalFusionTransformer
+from transfer_learning_publication.models.tft import TemporalFusionTransformer, TFTConfig
 from transfer_learning_publication.models.tft.lightning import LitTFT
 
 
@@ -261,7 +261,7 @@ class TestLitTFT:
             batch_size=None,
             batch_sampler=None,
         )
-        
+
         val_dataloader = torch.utils.data.DataLoader(
             [sample_batch],
             batch_size=None,

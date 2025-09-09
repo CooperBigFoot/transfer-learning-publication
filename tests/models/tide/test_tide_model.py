@@ -283,7 +283,7 @@ class TestTiDEModel:
         # We just check that not all outputs are identical
         train_variance = torch.stack(train_outputs).var(dim=0).mean()
         all_same = all(torch.allclose(train_outputs[0], train_outputs[i], atol=1e-6) for i in range(1, 20))
-        
+
         # Either we have variance OR the dropout effect is minimal due to architecture
         # The important thing is eval mode is deterministic
         assert not all_same or train_variance >= 0  # Accept minimal variance due to skip connections

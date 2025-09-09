@@ -4,13 +4,13 @@ import pytest
 import torch
 
 from transfer_learning_publication.models.tft import (
-    TFTConfig,
-    TemporalFusionTransformer,
-    GatedResidualNetwork,
-    VariableSelectionNetwork,
-    StaticCovariateEncoder,
-    InterpretableMultiHeadAttention,
     GLU,
+    GatedResidualNetwork,
+    InterpretableMultiHeadAttention,
+    StaticCovariateEncoder,
+    TemporalFusionTransformer,
+    TFTConfig,
+    VariableSelectionNetwork,
 )
 
 
@@ -25,9 +25,9 @@ class TestGLU:
 
         glu = GLU(input_size)
         x = torch.randn(batch_size, seq_len, input_size)
-        
+
         output = glu(x)
-        
+
         assert output.shape == (batch_size, seq_len, input_size)
         # Check that output is different from input (transformation applied)
         assert not torch.allclose(output, x)
@@ -105,13 +105,13 @@ class TestVariableSelectionNetwork:
         batch_size = 4
         seq_len = 10
         flattened_embedding = torch.randn(batch_size, seq_len, 3 * 32)  # num_inputs * input_dim
-        
+
         output = vsn(flattened_embedding)
-        
+
         # VSN returns a tuple of (processed_embeddings, sparse_weights)
         assert isinstance(output, tuple)
         processed_embeddings, sparse_weights = output
-        
+
         assert processed_embeddings.shape == (batch_size, seq_len, 64)  # hidden_size
         assert sparse_weights.shape == (batch_size, seq_len, 3)  # num_inputs
         # Check weights sum to approximately 1
@@ -195,7 +195,7 @@ class TestTemporalFusionTransformer:
     def test_forward_basic(self, basic_config):
         """Test basic forward pass."""
         model = TemporalFusionTransformer(basic_config)
-        
+
         batch_size = 4
         x = torch.randn(batch_size, basic_config.input_len, basic_config.input_size)
         static = torch.randn(batch_size, basic_config.static_size)
