@@ -119,10 +119,43 @@ class TestLSHDataModule:
         assert dataset_config.forcing_indices == [0, 1, 2]
         assert dataset_config.future_features == ["temperature"]
         assert dataset_config.future_indices == [2]
-        assert dataset_config.input_feature_indices == [0, 1, 2]  # All features in autoregressive
+        assert dataset_config.input_feature_indices == [0, 1, 2]  # Target first, then others
         assert dataset_config.is_autoregressive is True
         assert dataset_config.include_dates is True
 
+    def test_autoregressive_target_first_reordering(self, tmp_path):
+        """Test that target is reordered to index 0 for autoregressive models."""
+        # Create test config where target is NOT first in forcing list
+        config = {
+            "data": {"base_path": "/data", "region": "test"},
+            "features": {
+                "forcing": ["precipitation", "temperature", "streamflow"],  # Target is last
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+
+        # Test with feature order matching config (target at index 2)
+        feature_names = ["precipitation", "temperature", "streamflow"]
+        dataset_config = dm._build_dataset_config(feature_names)
+
+        assert dataset_config.target_name == "streamflow"
+        assert dataset_config.target_idx == 2  # Original position in feature_names
+        assert dataset_config.forcing_indices == [0, 1, 2]  # Original order preserved
+        
+        # CRITICAL: Check that input_feature_indices has target FIRST
+        assert dataset_config.input_feature_indices == [2, 0, 1]  # Target (2) moved to first position
+        assert dataset_config.input_feature_indices[0] == dataset_config.target_idx  # Verify target is first
+        
     def test_build_dataset_config_non_autoregressive_validation(self, tmp_path):
         """Test that non-autoregressive mode validates target not in forcing."""
         # Test that it raises error when target is in forcing for non-autoregressive
@@ -173,7 +206,7 @@ class TestLSHDataModule:
         with pytest.raises(ValueError, match="Target 'streamflow' not found in features"):
             dm._build_dataset_config(feature_names)
 
-    @patch("transfer_learning_publication.data.timeseries_datamodule.CaravanDataSource")
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
     def test_build_container_success(self, mock_caravan_class, tmp_path):
         """Test _build_container with successful data loading."""
         # Setup config
@@ -263,7 +296,7 @@ class TestLSHDataModule:
         with pytest.raises(FileNotFoundError, match="Data path not found for split 'train'"):
             dm._build_container("train")
 
-    @patch("transfer_learning_publication.data.timeseries_datamodule.LSHDataset")
+    @patch("transfer_learning_publication.data.lsh_datamodule.LSHDataset")
     @patch.object(LSHDataModule, "_build_container")
     def test_setup_fit_stage(self, mock_build_container, mock_dataset_class, tmp_path):
         """Test setup method for fit stage."""

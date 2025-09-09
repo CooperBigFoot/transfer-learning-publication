@@ -235,7 +235,15 @@ class LSHDataModule(LightningDataModule):
         # Determine input features based on autoregressive mode
         if config["model"]["is_autoregressive"]:
             # In autoregressive mode, all forcing features are inputs
-            input_feature_indices = forcing_indices
+            # CRITICAL: Target must be first (index 0) for autoregressive models
+            if target_idx in forcing_indices:
+                input_feature_indices = [target_idx] + [idx for idx in forcing_indices if idx != target_idx]
+            else:
+                input_feature_indices = forcing_indices
+                logger.warning(
+                    f"Target '{target_name}' not found in forcing features for autoregressive model. "
+                    "This may cause issues with model training."
+                )
         else:
             # In non-autoregressive mode, exclude target from input features
             input_feature_indices = [idx for idx in forcing_indices if idx != target_idx]
