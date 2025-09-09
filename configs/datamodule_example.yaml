@@ -7,9 +7,21 @@ data:
   # Expected structure: base_path/{train,val,test}/REGION_NAME=.../data_type=.../...
   base_path: "/Users/cooper/Desktop/CARAVAN_CLEAN"
   
-  # Region to load data from
+  # ========== BASIN SPECIFICATION OPTIONS ==========
+  # You must specify basins using ONE of these three methods:
+  
+  # Option 1: Region-based (gets all basins from specified region(s))
   # Can be a single region name (e.g., "camels") or a list (e.g., ["camels", "hysets"])
   region: "tajikkyrgyz"
+  
+  # Option 2: Explicit basin list (overrides region if both are specified)
+  # Useful for small, specific basin selections
+  # gauge_ids: ["basin1", "basin2", "basin3"]
+  
+  # Option 3: External file with basin IDs (takes priority over both region and gauge_ids)
+  # Useful for large lists (thousands of basins)
+  # File should contain one basin ID per line
+  # gauge_ids_file: "/path/to/basin_ids.txt"
   
   # Optional: Path to fitted preprocessing pipeline for inverse transforms
   # Used to transform predictions back to original scale
@@ -80,11 +92,55 @@ dataloader:
   # Validation and test data are never shuffled
   shuffle_train: true
 
-# Alternative minimal configuration example:
+# ========== ALTERNATIVE CONFIGURATION EXAMPLES ==========
+
+# Example 1: Minimal configuration with region
 # ---
 # data:
 #   base_path: "/data/processed"
 #   region: "camels"
+# 
+# features:
+#   forcing: ["streamflow", "precipitation", "temperature"]
+#   static: ["area", "elevation"]
+#   target: "streamflow"
+# 
+# sequence:
+#   input_length: 365
+#   output_length: 1
+# 
+# model:
+#   is_autoregressive: true
+# 
+# dataloader:
+#   batch_size: 32
+
+# Example 2: Using explicit gauge IDs (no region needed)
+# ---
+# data:
+#   base_path: "/data/processed"
+#   gauge_ids: ["01013500", "01030500", "01031500", "01047000", "01052500"]
+# 
+# features:
+#   forcing: ["streamflow", "precipitation", "temperature"]
+#   static: ["area", "elevation"]
+#   target: "streamflow"
+# 
+# sequence:
+#   input_length: 365
+#   output_length: 1
+# 
+# model:
+#   is_autoregressive: true
+# 
+# dataloader:
+#   batch_size: 32
+
+# Example 3: Using external file for large basin lists
+# ---
+# data:
+#   base_path: "/data/processed"
+#   gauge_ids_file: "/experiments/basin_subset_5000.txt"
 # 
 # features:
 #   forcing: ["streamflow", "precipitation", "temperature"]

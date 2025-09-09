@@ -80,6 +80,128 @@ class TestLSHDataModule:
 
         with pytest.raises(ValueError, match="Missing required config: data.base_path"):
             LSHDataModule(config_path)
+    
+    def test_config_missing_basin_specification(self, tmp_path):
+        """Test that config requires at least one way to specify basins."""
+        # Config with base_path but no region, gauge_ids, or gauge_ids_file
+        config = {
+            "data": {"base_path": "/data"},  # Missing region, gauge_ids, or gauge_ids_file
+            "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        with pytest.raises(ValueError, match="Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"):
+            LSHDataModule(config_path)
+    
+    def test_config_with_gauge_ids_list(self, tmp_path):
+        """Test configuration with explicit gauge_ids list."""
+        config = {
+            "data": {
+                "base_path": "/data",
+                "gauge_ids": ["basin1", "basin2", "basin3"]  # No region needed
+            },
+            "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        assert dm.config["data"]["gauge_ids"] == ["basin1", "basin2", "basin3"]
+        assert "region" not in dm.config["data"]  # Region not required
+    
+    def test_config_with_gauge_ids_file(self, tmp_path):
+        """Test configuration with gauge_ids_file."""
+        # Create a file with gauge IDs
+        gauge_ids_file = tmp_path / "gauge_ids.txt"
+        with open(gauge_ids_file, "w") as f:
+            f.write("basin1\n")
+            f.write("basin2\n")
+            f.write("basin3\n")
+            f.write("  basin4  \n")  # Test whitespace handling
+            f.write("\n")  # Empty line
+        
+        config = {
+            "data": {
+                "base_path": "/data",
+                "gauge_ids_file": str(gauge_ids_file)  # No region needed
+            },
+            "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        assert dm.config["data"]["gauge_ids_file"] == str(gauge_ids_file)
+        
+        # Test that _load_gauge_ids correctly loads from file
+        gauge_ids = dm._load_gauge_ids()
+        assert gauge_ids == ["basin1", "basin2", "basin3", "basin4"]
+    
+    def test_config_gauge_ids_file_not_found(self, tmp_path):
+        """Test error when gauge_ids_file doesn't exist."""
+        config = {
+            "data": {
+                "base_path": "/data",
+                "gauge_ids_file": "/nonexistent/file.txt"
+            },
+            "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        with pytest.raises(FileNotFoundError, match="Gauge IDs file not found"):
+            LSHDataModule(config_path)
+    
+    def test_load_gauge_ids_priority(self, tmp_path):
+        """Test that gauge_ids_file takes priority over gauge_ids list."""
+        # Create a file with gauge IDs
+        gauge_ids_file = tmp_path / "gauge_ids.txt"
+        with open(gauge_ids_file, "w") as f:
+            f.write("file_basin1\n")
+            f.write("file_basin2\n")
+        
+        config = {
+            "data": {
+                "base_path": "/data",
+                "gauge_ids_file": str(gauge_ids_file),  # This should take priority
+                "gauge_ids": ["list_basin1", "list_basin2"],  # This should be ignored
+                "region": "test"  # This should also be ignored
+            },
+            "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        gauge_ids = dm._load_gauge_ids()
+        # Should use file, not list
+        assert gauge_ids == ["file_basin1", "file_basin2"]
 
     def test_build_dataset_config_autoregressive(self, tmp_path):
         """Test _build_dataset_config for autoregressive mode."""
@@ -201,6 +323,81 @@ class TestLSHDataModule:
         feature_names = ["precipitation", "temperature"]
         with pytest.raises(ValueError, match="Target 'streamflow' not found in features"):
             dm._build_dataset_config(feature_names)
+
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
+    def test_build_container_with_explicit_gauge_ids(self, mock_caravan_class, tmp_path):
+        """Test _build_container with explicit gauge IDs (no region needed)."""
+        # Setup config with explicit gauge_ids
+        config = {
+            "data": {
+                "base_path": str(tmp_path),
+                "gauge_ids": ["gauge1", "gauge2", "gauge3"]  # No region!
+            },
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "model": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        # Create data directories
+        (tmp_path / "train").mkdir()
+
+        # Setup mocks
+        mock_caravan = MagicMock()
+        mock_caravan_class.return_value = mock_caravan
+
+        # Mock LazyFrames
+        mock_ts_lf = MagicMock()
+        mock_static_lf = MagicMock()
+        mock_caravan.get_timeseries.return_value = mock_ts_lf
+        mock_caravan.get_static_attributes.return_value = mock_static_lf
+
+        # Mock collections
+        mock_time_series = MagicMock()
+        mock_time_series.feature_names = ["streamflow", "precipitation"]
+        mock_time_series.__len__.return_value = 3  # 3 gauges
+        mock_time_series.get_n_features.return_value = 2
+
+        mock_static_attrs = MagicMock()
+        mock_static_attrs.attribute_names = ["area"]
+        mock_static_attrs.__len__.return_value = 3
+        mock_static_attrs.get_n_attributes.return_value = 1
+
+        mock_caravan.to_time_series_collection.return_value = mock_time_series
+        mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
+
+        # Initialize datamodule
+        dm = LSHDataModule(config_path)
+
+        # Test container building
+        with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
+            mock_find.return_value = torch.tensor([[0, 0, 11], [0, 1, 12], [1, 0, 11]])
+
+            container = dm._build_container("train")
+
+        # Verify CaravanDataSource was initialized with region=None (no region filter)
+        mock_caravan_class.assert_called_with(base_path=tmp_path / "train", region=None)
+        
+        # Verify the explicit gauge IDs were used
+        mock_caravan.get_timeseries.assert_called_with(
+            gauge_ids=["gauge1", "gauge2", "gauge3"],
+            columns=["streamflow", "precipitation"]
+        )
+        mock_caravan.get_static_attributes.assert_called_with(
+            gauge_ids=["gauge1", "gauge2", "gauge3"],
+            columns=["area"]
+        )
+        
+        # list_gauge_ids should NOT have been called since we provided explicit IDs
+        mock_caravan.list_gauge_ids.assert_not_called()
 
     @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
     def test_build_container_success(self, mock_caravan_class, tmp_path):

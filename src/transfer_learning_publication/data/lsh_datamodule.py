@@ -79,8 +79,22 @@ class LSHDataModule(LightningDataModule):
 
         if "base_path" not in config["data"]:
             raise ValueError("Missing required config: data.base_path")
-        if "region" not in config["data"]:
-            raise ValueError("Missing required config: data.region")
+        
+        # Validate that we have at least one way to specify basins
+        has_region = "region" in config["data"]
+        has_gauge_ids = "gauge_ids" in config["data"]
+        has_gauge_ids_file = "gauge_ids_file" in config["data"]
+        
+        if not (has_region or has_gauge_ids or has_gauge_ids_file):
+            raise ValueError(
+                "Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"
+            )
+        
+        # Validate gauge_ids_file exists if specified
+        if has_gauge_ids_file:
+            gauge_ids_path = Path(config["data"]["gauge_ids_file"])
+            if not gauge_ids_path.exists():
+                raise FileNotFoundError(f"Gauge IDs file not found: {gauge_ids_path}")
 
         if "forcing" not in config["features"]:
             raise ValueError("Missing required config: features.forcing")
@@ -101,6 +115,44 @@ class LSHDataModule(LightningDataModule):
             raise ValueError("Missing required config: dataloader.batch_size")
 
         return config
+
+    def _load_gauge_ids(self) -> list[str] | None:
+        """
+        Load gauge IDs from config or file.
+        
+        Returns:
+            List of gauge IDs if explicitly specified, None to use region-based discovery
+        """
+        config_data = self.config["data"]
+        
+        # Priority 1: gauge_ids_file
+        if "gauge_ids_file" in config_data:
+            gauge_ids_path = Path(config_data["gauge_ids_file"])
+            logger.info(f"Loading gauge IDs from file: {gauge_ids_path}")
+            
+            with open(gauge_ids_path) as f:
+                gauge_ids = [line.strip() for line in f if line.strip()]
+            
+            if not gauge_ids:
+                raise ValueError(f"No gauge IDs found in file: {gauge_ids_path}")
+            
+            logger.info(f"Loaded {len(gauge_ids)} gauge IDs from file")
+            return gauge_ids
+        
+        # Priority 2: gauge_ids list in config
+        if "gauge_ids" in config_data:
+            gauge_ids = config_data["gauge_ids"]
+            if not isinstance(gauge_ids, list):
+                raise ValueError("config data.gauge_ids must be a list")
+            if not gauge_ids:
+                raise ValueError("config data.gauge_ids cannot be empty")
+            
+            logger.info(f"Using {len(gauge_ids)} gauge IDs from config")
+            return gauge_ids
+        
+        # Priority 3: Use region-based discovery (return None)
+        logger.info("No explicit gauge IDs provided, will use region-based discovery")
+        return None
 
     def setup(self, stage: str | None = None) -> None:
         """
@@ -145,12 +197,26 @@ class LSHDataModule(LightningDataModule):
         if not base_path.exists():
             raise FileNotFoundError(f"Data path not found for split '{split}': {base_path}")
 
-        caravan = CaravanDataSource(base_path=base_path, region=self.config["data"]["region"])
-
-        basins = caravan.list_gauge_ids()
-        if not basins:
-            raise ValueError(f"No basins found for split '{split}' in {base_path}")
-
+        # Load gauge IDs (either explicit or from region)
+        explicit_gauge_ids = self._load_gauge_ids()
+        
+        if explicit_gauge_ids is not None:
+            # Use explicit gauge IDs - no region filter needed
+            caravan = CaravanDataSource(base_path=base_path, region=None)
+            basins = explicit_gauge_ids
+            logger.info(f"Using {len(basins)} explicitly specified gauge IDs for {split} split")
+        else:
+            # Use region-based discovery (existing behavior)
+            region = self.config["data"].get("region")
+            if not region:
+                raise ValueError("Must specify data.region when not providing explicit gauge IDs")
+            
+            caravan = CaravanDataSource(base_path=base_path, region=region)
+            basins = caravan.list_gauge_ids()
+            if not basins:
+                raise ValueError(f"No basins found for split '{split}' in {base_path}")
+            logger.info(f"Found {len(basins)} basins from region '{region}' for {split} split")
+        
         logger.info(f"Loading data for {len(basins)} basins from {split} split...")
 
         # Load time series data

@@ -1,0 +1,25 @@
+# Example gauge IDs file for LSHDataModule
+# One gauge ID per line
+# Lines starting with # are treated as comments and will be ignored
+# Empty lines are also ignored
+
+01013500
+01030500
+01031500
+01047000
+01052500
+01054200
+01055000
+01057000
+01059000
+01064500
+01068310
+01072870
+01073000
+01075000
+01076500
+01078000
+01086000
+01094000
+01096000
+01097000
