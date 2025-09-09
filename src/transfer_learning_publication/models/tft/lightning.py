@@ -5,10 +5,12 @@ from typing import Any
 import torch
 
 from ..base.base_lit_model import BaseLitModel
+from ..model_factory import register_model
 from .config import TFTConfig
 from .model import TemporalFusionTransformer
 
 
+@register_model("tft", config_class=TFTConfig)
 class LitTFT(BaseLitModel):
     """PyTorch Lightning Module implementation of TFT.
 

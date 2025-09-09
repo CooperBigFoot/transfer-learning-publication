@@ -5,10 +5,12 @@ from typing import Any
 import torch
 
 from ..base.base_lit_model import BaseLitModel
+from ..model_factory import register_model
 from .config import TSMixerConfig
 from .model import TSMixer
 
 
+@register_model("tsmixer", config_class=TSMixerConfig)
 class LitTSMixer(BaseLitModel):
     """PyTorch Lightning Module implementation of TSMixer.
 

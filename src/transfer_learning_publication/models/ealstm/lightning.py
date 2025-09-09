@@ -5,10 +5,12 @@ from typing import Any
 import torch
 
 from ..base.base_lit_model import BaseLitModel
+from ..model_factory import register_model
 from .config import EALSTMConfig
 from .model import EALSTM, BiEALSTM
 
 
+@register_model("ealstm", config_class=EALSTMConfig)
 class LitEALSTM(BaseLitModel):
     """PyTorch Lightning Module implementation of EA-LSTM.
 

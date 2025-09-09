@@ -5,10 +5,12 @@ from typing import Any
 import torch
 
 from ..base.base_lit_model import BaseLitModel
+from ..model_factory import register_model
 from .config import TiDEConfig
 from .model import TiDEModel
 
 
+@register_model("tide", config_class=TiDEConfig)
 class LitTiDE(BaseLitModel):
     """PyTorch Lightning Module implementation of TiDE.
 
