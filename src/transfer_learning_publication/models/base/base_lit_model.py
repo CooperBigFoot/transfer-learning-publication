@@ -37,6 +37,7 @@ class BaseLitModel(pl.LightningModule):
             self.rev_in = None
 
         self.test_outputs = []
+        self._forecast_output: ForecastOutput | None = None
 
     def forward(
         self,
@@ -141,6 +142,7 @@ class BaseLitModel(pl.LightningModule):
     def on_test_epoch_start(self) -> None:
         """Initialize test output collection."""
         self.test_outputs = []
+        self._forecast_output = None
 
     def on_test_epoch_end(self) -> ForecastOutput:
         """Consolidate test outputs into ForecastOutput contract.
@@ -167,10 +169,27 @@ class BaseLitModel(pl.LightningModule):
             input_end_dates=input_end_dates,
         )
 
+        # Store for later access
+        self._forecast_output = forecast_output
+
         # Clear temporary storage
         self.test_outputs = []
 
         return forecast_output
+
+    @property
+    def forecast_output(self) -> ForecastOutput:
+        """Retrieve the stored forecast output from testing.
+
+        Returns:
+            ForecastOutput object from last test run
+
+        Raises:
+            RuntimeError: If testing has not been run yet
+        """
+        if self._forecast_output is None:
+            raise RuntimeError("No forecast output available. Run trainer.test() first.")
+        return self._forecast_output
 
     def configure_optimizers(self) -> dict[str, Any]:
         """Configure optimizer and learning rate scheduler.

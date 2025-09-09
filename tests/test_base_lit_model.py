@@ -51,6 +51,7 @@ class TestBaseLitModel:
         assert naive_model.rev_in is None  # use_rev_in=False
         assert isinstance(naive_model.criterion, torch.nn.MSELoss)
         assert naive_model.test_outputs == []
+        assert naive_model._forecast_output is None
 
     def test_initialization_with_rev_in(self):
         """Test model initialization with RevIN enabled."""
@@ -119,6 +120,10 @@ class TestBaseLitModel:
 
         # Check that test_outputs is cleared
         assert naive_model.test_outputs == []
+        
+        # Check that forecast_output is stored internally
+        assert naive_model._forecast_output is not None
+        assert naive_model._forecast_output is forecast_output
 
     def test_test_epoch_end_no_outputs(self, naive_model):
         """Test error when no test outputs collected."""
@@ -167,6 +172,43 @@ class TestBaseLitModel:
         assert "output_len" in hparams
         assert "input_size" in hparams
         assert "learning_rate" in hparams
+
+    def test_forecast_output_property(self, naive_model, sample_batch):
+        """Test forecast_output property access."""
+        # Should raise error before testing
+        with pytest.raises(RuntimeError, match="No forecast output available"):
+            _ = naive_model.forecast_output
+            
+        # Run test epoch
+        naive_model.on_test_epoch_start()
+        for i in range(2):
+            naive_model.test_step(sample_batch, batch_idx=i)
+        result = naive_model.on_test_epoch_end()
+        
+        # Now property should work
+        stored_output = naive_model.forecast_output
+        assert stored_output is result
+        assert isinstance(stored_output, ForecastOutput)
+        assert stored_output.predictions.shape == (8, 5)  # 2 batches * 4 samples
+        
+    def test_forecast_output_reset_on_new_test(self, naive_model, sample_batch):
+        """Test that forecast_output is reset on new test epoch."""
+        # Run first test
+        naive_model.on_test_epoch_start()
+        naive_model.test_step(sample_batch, batch_idx=0)
+        first_output = naive_model.on_test_epoch_end()
+        
+        # Start new test - should reset
+        naive_model.on_test_epoch_start()
+        assert naive_model._forecast_output is None
+        
+        # Run second test
+        naive_model.test_step(sample_batch, batch_idx=0)
+        second_output = naive_model.on_test_epoch_end()
+        
+        # Should have new output
+        assert naive_model.forecast_output is second_output
+        assert naive_model.forecast_output is not first_output
 
     def test_rev_in_normalization(self):
         """Test RevIN normalization and denormalization."""
