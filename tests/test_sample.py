@@ -130,7 +130,7 @@ class TestSample:
         X = torch.randn(10, 5)
         y = torch.randn(5)
         static = torch.randn(3)
-        
+
         with pytest.raises(TypeError, match="future must be torch.Tensor"):
             Sample(
                 X=X,
@@ -144,7 +144,7 @@ class TestSample:
         """Test validation of X tensor dimensions."""
         _, y, static, future = valid_tensors
         X_1d = torch.randn(10)  # 1D instead of 2D
-        
+
         with pytest.raises(ValueError, match="X must be 2D"):
             Sample(
                 X=X_1d,
@@ -158,7 +158,7 @@ class TestSample:
         """Test validation of y tensor dimensions."""
         X, _, static, future = valid_tensors
         y_3d = torch.randn(5, 1, 1)  # 3D instead of 1D or 2D
-        
+
         with pytest.raises(ValueError, match="y must be 1D or 2D"):
             Sample(
                 X=X,
@@ -172,7 +172,7 @@ class TestSample:
         """Test validation of static tensor dimensions."""
         X, y, _, future = valid_tensors
         static_2d = torch.randn(3, 1)  # 2D instead of 1D
-        
+
         with pytest.raises(ValueError, match="static must be 1D"):
             Sample(
                 X=X,
@@ -188,7 +188,7 @@ class TestSample:
         y = torch.randn(5)
         static = torch.randn(3)
         future_1d = torch.randn(5)  # 1D instead of 2D
-        
+
         with pytest.raises(ValueError, match="future must be 2D"):
             Sample(
                 X=X,
@@ -204,7 +204,7 @@ class TestSample:
         y = torch.randn(5)
         static = torch.randn(3)
         future = torch.randn(3, 2)  # Wrong length (3 instead of 5)
-        
+
         with pytest.raises(ValueError, match="future length .* must match output length"):
             Sample(
                 X=X,
@@ -220,7 +220,7 @@ class TestSample:
         y = torch.randn(5)
         static = torch.randn(0)  # No static features
         future = torch.empty(5, 0)  # Empty future tensor
-        
+
         sample = Sample(
             X=X,
             y=y,
@@ -228,7 +228,7 @@ class TestSample:
             future=future,
             group_identifier="gauge_001",
         )
-        
+
         assert sample.X.shape == (10, 0)
         assert sample.static.shape == (0,)
         assert sample.future.shape == (5, 0)
@@ -240,7 +240,7 @@ class TestSample:
         y = torch.randn(0)  # Zero output length
         static = torch.randn(3)
         future = torch.randn(0, 2)  # Matching zero output length
-        
+
         sample = Sample(
             X=X,
             y=y,
@@ -248,7 +248,7 @@ class TestSample:
             future=future,
             group_identifier="gauge_001",
         )
-        
+
         assert sample.X.shape == (0, 5)
         assert sample.y.shape == (0,)
         assert sample.future.shape == (0, 2)

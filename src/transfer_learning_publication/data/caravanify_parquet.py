@@ -6,6 +6,7 @@ import polars as pl
 
 from ..containers import StaticAttributeCollection, TimeSeriesCollection
 
+
 class CaravanDataSource:
     """
     Lazy data access for Caravan datasets using Polars and hive partitioning.
@@ -100,7 +101,7 @@ class CaravanDataSource:
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - no data
             return []
-            
+
         try:
             # Use union_by_name to handle schema differences
             lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
@@ -133,7 +134,7 @@ class CaravanDataSource:
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - no data
             return []
-            
+
         try:
             lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
             schema = lf.collect_schema()
@@ -156,7 +157,7 @@ class CaravanDataSource:
         if isinstance(self._attr_glob, list) and not self._attr_glob:
             # Empty list - no data
             return []
-            
+
         try:
             lf = pl.scan_parquet(self._attr_glob, hive_partitioning=True, n_rows=0, rechunk=False, low_memory=True)
             schema = lf.collect_schema()
@@ -187,7 +188,7 @@ class CaravanDataSource:
                 "min_date": pl.Series([], dtype=pl.Date),
                 "max_date": pl.Series([], dtype=pl.Date),
             }).lazy()
-            
+
         lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
         # Handle date dtype normalization if stored as string
@@ -224,7 +225,7 @@ class CaravanDataSource:
             LazyFrame with timeseries data
         """
         import warnings
-        
+
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - return empty LazyFrame
             empty_df = pl.DataFrame({
@@ -236,7 +237,7 @@ class CaravanDataSource:
                 for col in columns:
                     empty_df = empty_df.with_columns(pl.lit(None).alias(col))
             return empty_df.lazy()
-            
+
         lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
         # Handle date dtype normalization if stored as string
@@ -264,7 +265,7 @@ class CaravanDataSource:
             # Keep metadata columns plus requested columns
             keep_cols = {"REGION_NAME", "gauge_id", "date"} | set(columns)
             available_cols = set(lf.collect_schema().names())
-            
+
             # Check for missing columns and warn
             requested_cols = set(columns)
             missing_cols = requested_cols - available_cols
@@ -275,7 +276,7 @@ class CaravanDataSource:
                     UserWarning,
                     stacklevel=2
                 )
-            
+
             cols_to_select = list(keep_cols & available_cols)
             lf = lf.select(cols_to_select)
 
@@ -297,7 +298,7 @@ class CaravanDataSource:
             LazyFrame with static attributes
         """
         import warnings
-        
+
         if isinstance(self._attr_glob, list) and not self._attr_glob:
             # Empty list - return empty LazyFrame
             empty_df = pl.DataFrame(
@@ -310,7 +311,7 @@ class CaravanDataSource:
                 for col in columns:
                     empty_df = empty_df.with_columns(pl.lit(None).alias(col))
             return empty_df.lazy()
-            
+
         # Check if files exist first
         from glob import glob
 
@@ -320,7 +321,7 @@ class CaravanDataSource:
                 files.extend(glob(pattern))
         else:
             files = glob(self._attr_glob)
-            
+
         if not files:
             # Return empty LazyFrame with expected schema when no files found
             empty_df = pl.DataFrame(
@@ -345,7 +346,7 @@ class CaravanDataSource:
             # Keep metadata columns plus requested attributes
             keep_cols = {"REGION_NAME", "gauge_id"} | set(columns)
             available_cols = set(lf.collect_schema().names())
-            
+
             # Check for missing columns and warn
             requested_cols = set(columns)
             missing_cols = requested_cols - available_cols
@@ -356,7 +357,7 @@ class CaravanDataSource:
                     UserWarning,
                     stacklevel=2
                 )
-            
+
             cols_to_select = list(keep_cols & available_cols)
             lf = lf.select(cols_to_select)
 
@@ -373,7 +374,7 @@ class CaravanDataSource:
             GeoDataFrame with watershed geometries
         """
         gdfs = []
-        
+
         if isinstance(self.region, str):
             # Single region
             shapefile_path = self._shapefile_patterns[0] / f"{self.region}_shapes.shp"
@@ -383,27 +384,27 @@ class CaravanDataSource:
             gdf = gpd.read_file(shapefile_path)
             gdf["REGION_NAME"] = self.region  # Add region column for consistency
             gdfs.append(gdf)
-            
+
         elif isinstance(self.region, list):
             # Multiple regions specified
             if not self.region:
                 # Empty list
                 raise FileNotFoundError("No regions specified")
-                
+
             for region_name in self.region:
                 shapefile_path = self.base_path / f"REGION_NAME={region_name}" / "data_type=shapefiles" / f"{region_name}_shapes.shp"
                 if shapefile_path.exists():
                     gdf = gpd.read_file(shapefile_path)
                     gdf["REGION_NAME"] = region_name
                     gdfs.append(gdf)
-                    
+
         else:
             # No region specified - load all available
             for pattern in self._shapefile_patterns:
                 for region_dir in pattern.parent.glob("REGION_NAME=*"):
                     region_name = region_dir.name.split("=")[1]
                     shapefile_path = region_dir / "data_type=shapefiles" / f"{region_name}_shapes.shp"
-                    
+
                     if shapefile_path.exists():
                         gdf = gpd.read_file(shapefile_path)
                         gdf["REGION_NAME"] = region_name

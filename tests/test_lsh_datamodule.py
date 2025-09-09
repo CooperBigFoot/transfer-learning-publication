@@ -1,15 +1,11 @@
-import tempfile
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import polars as pl
 import pytest
 import torch
 import yaml
 from torch.utils.data import DataLoader
 
 from transfer_learning_publication.containers import DatasetConfig, LSHDataContainer, SequenceIndex
-from transfer_learning_publication.contracts import Batch
 from transfer_learning_publication.data import LSHDataModule
 
 
@@ -151,11 +147,11 @@ class TestLSHDataModule:
         assert dataset_config.target_name == "streamflow"
         assert dataset_config.target_idx == 2  # Original position in feature_names
         assert dataset_config.forcing_indices == [0, 1, 2]  # Original order preserved
-        
+
         # CRITICAL: Check that input_feature_indices has target FIRST
         assert dataset_config.input_feature_indices == [2, 0, 1]  # Target (2) moved to first position
         assert dataset_config.input_feature_indices[0] == dataset_config.target_idx  # Verify target is first
-        
+
     def test_build_dataset_config_non_autoregressive_validation(self, tmp_path):
         """Test that non-autoregressive mode validates target not in forcing."""
         # Test that it raises error when target is in forcing for non-autoregressive

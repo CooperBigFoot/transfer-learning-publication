@@ -542,13 +542,13 @@ class TestErrorHandling:
     def test_warn_missing_timeseries_columns(self, temp_hive_data):
         """Test warning when requesting non-existent timeseries columns."""
         ds = CaravanDataSource(temp_hive_data)
-        
+
         # Request mix of existing and non-existent columns
         with pytest.warns(UserWarning) as record:
             ts_data = ds.get_timeseries(
                 columns=["streamflow", "nonexistent1", "temperature", "nonexistent2"]
             ).collect()
-        
+
         # Check warning message contains missing columns
         assert len(record) == 1
         warning_msg = str(record[0].message)
@@ -556,7 +556,7 @@ class TestErrorHandling:
         assert "nonexistent2" in warning_msg
         assert "Requested timeseries columns not found in data" in warning_msg
         assert "Available columns:" in warning_msg
-        
+
         # Verify only existing columns are returned
         assert "streamflow" in ts_data.columns
         assert "temperature" in ts_data.columns
@@ -566,13 +566,13 @@ class TestErrorHandling:
     def test_warn_missing_static_attributes(self, temp_hive_data):
         """Test warning when requesting non-existent attribute columns."""
         ds = CaravanDataSource(temp_hive_data)
-        
+
         # Request mix of existing and non-existent attributes
         with pytest.warns(UserWarning) as record:
             attrs = ds.get_static_attributes(
                 columns=["area", "nonexistent_attr", "elevation", "missing_col"]
             ).collect()
-        
+
         # Check warning message contains missing columns
         assert len(record) == 1
         warning_msg = str(record[0].message)
@@ -580,7 +580,7 @@ class TestErrorHandling:
         assert "missing_col" in warning_msg
         assert "Requested attribute columns not found in data" in warning_msg
         assert "Available columns:" in warning_msg
-        
+
         # Verify only existing columns are returned
         assert "area" in attrs.columns
         assert "elevation" in attrs.columns
@@ -590,16 +590,16 @@ class TestErrorHandling:
     def test_no_warning_when_all_columns_exist(self, temp_hive_data):
         """Test no warning when all requested columns exist."""
         import warnings
-        
+
         ds = CaravanDataSource(temp_hive_data)
-        
+
         # Request only existing columns - should not warn
         with warnings.catch_warnings():
             warnings.simplefilter("error")  # Turn warnings into errors
             # This will raise if any warning is issued
             ts_data = ds.get_timeseries(columns=["streamflow", "temperature"]).collect()
             attrs = ds.get_static_attributes(columns=["area", "elevation"]).collect()
-        
+
         # Verify data was retrieved correctly
         assert "streamflow" in ts_data.columns
         assert "temperature" in ts_data.columns
@@ -609,11 +609,11 @@ class TestErrorHandling:
     def test_warning_with_region_filter(self, temp_hive_data):
         """Test warning works correctly with region filtering."""
         ds = CaravanDataSource(temp_hive_data, region="camels")
-        
+
         # Request non-existent column for specific region
         with pytest.warns(UserWarning, match="Requested timeseries columns not found in data: \\['missing'\\]"):
             ts_data = ds.get_timeseries(columns=["missing"]).collect()
-        
+
         # Verify metadata columns are still returned
         assert "gauge_id" in ts_data.columns
         assert "date" in ts_data.columns
@@ -623,14 +623,14 @@ class TestErrorHandling:
     def test_warning_with_empty_result(self, temp_hive_data):
         """Test warning when columns are missing even with empty result."""
         ds = CaravanDataSource(temp_hive_data)
-        
+
         # Request non-existent columns with non-existent gauge (empty result)
         with pytest.warns(UserWarning, match="Requested timeseries columns not found in data"):
             ts_data = ds.get_timeseries(
                 gauge_ids=["nonexistent_gauge"],
                 columns=["missing_column"]
             ).collect()
-        
+
         assert len(ts_data) == 0  # Empty result
         assert "missing_column" not in ts_data.columns
 
@@ -642,11 +642,11 @@ class TestMultipleRegionsData:
         """Test getting timeseries from multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
         ts_data = ds.get_timeseries().collect()
-        
+
         # Should get data from both regions
         assert len(ts_data) == 50  # 5 gauges * 10 days
         assert set(ts_data["REGION_NAME"].unique()) == {"camels", "hysets"}
-        
+
         # Check we have gauges from both regions
         gauge_ids = set(ts_data["gauge_id"].unique())
         assert "G01013500" in gauge_ids  # From camels
@@ -656,7 +656,7 @@ class TestMultipleRegionsData:
         """Test getting timeseries with single region in list."""
         ds = CaravanDataSource(temp_hive_data, region=["camels"])
         ts_data = ds.get_timeseries().collect()
-        
+
         assert len(ts_data) == 30  # 3 gauges * 10 days
         assert ts_data["REGION_NAME"].unique()[0] == "camels"
 
@@ -664,7 +664,7 @@ class TestMultipleRegionsData:
         """Test getting timeseries with empty region list."""
         ds = CaravanDataSource(temp_hive_data, region=[])
         ts_data = ds.get_timeseries().collect()
-        
+
         assert len(ts_data) == 0
         assert "gauge_id" in ts_data.columns
         assert "date" in ts_data.columns
@@ -673,7 +673,7 @@ class TestMultipleRegionsData:
         """Test getting attributes from multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
         attrs = ds.get_static_attributes().collect()
-        
+
         assert len(attrs) == 5  # 3 from camels + 2 from hysets
         assert set(attrs["REGION_NAME"].unique()) == {"camels", "hysets"}
 
@@ -681,18 +681,18 @@ class TestMultipleRegionsData:
         """Test getting date ranges from multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
         date_ranges = ds.get_date_ranges().collect()
-        
+
         assert len(date_ranges) == 5  # All gauges
         assert set(date_ranges["REGION_NAME"].unique()) == {"camels", "hysets"}
 
     def test_filter_gauge_ids_across_regions(self, temp_hive_data):
         """Test filtering gauge IDs works across multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
-        
+
         # Get data for specific gauges from different regions
         gauge_ids = ["G01013500", "02LE024"]  # One from each region
         ts_data = ds.get_timeseries(gauge_ids=gauge_ids).collect()
-        
+
         assert len(ts_data) == 20  # 2 gauges * 10 days
         assert set(ts_data["gauge_id"].unique()) == set(gauge_ids)
 
@@ -700,7 +700,7 @@ class TestMultipleRegionsData:
         """Test listing variables with multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
         variables = ds.list_timeseries_variables()
-        
+
         # Both regions have the same variables in test data
         assert sorted(variables) == ["precipitation", "streamflow", "temperature"]
 
@@ -708,7 +708,7 @@ class TestMultipleRegionsData:
         """Test listing attributes with multiple regions."""
         ds = CaravanDataSource(temp_hive_data, region=["camels", "hysets"])
         attributes = ds.list_static_attributes()
-        
+
         # Both regions have the same attributes in test data
         expected = ["area", "elevation", "forest_cover", "slope", "urban_area"]
         assert sorted(attributes) == sorted(expected)
@@ -757,38 +757,38 @@ class TestMultipleRegionsErrorHandling:
     def test_write_timeseries_with_list_of_regions_error(self, tmp_path):
         """Test that writing timeseries with list of regions raises error."""
         ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
-        
+
         df = pl.DataFrame({
             "gauge_id": ["G001"],
             "date": ["2020-01-01"],
             "streamflow": [10.5],
         })
-        
+
         with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
             ds.write_timeseries(df, tmp_path)
 
     def test_write_static_attributes_with_list_of_regions_error(self, tmp_path):
         """Test that writing attributes with list of regions raises error."""
         ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
-        
+
         df = pl.DataFrame({
             "gauge_id": ["G001"],
             "area": [100.5],
         })
-        
+
         with pytest.raises(ValueError, match="Cannot write attributes with multiple regions"):
             ds.write_static_attributes(df, tmp_path)
 
     def test_write_with_empty_list_error(self, tmp_path):
         """Test that writing with empty region list raises error."""
         ds = CaravanDataSource(tmp_path, region=[])
-        
+
         df = pl.DataFrame({
             "gauge_id": ["G001"],
             "date": ["2020-01-01"],
             "streamflow": [10.5],
         })
-        
+
         with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
             ds.write_timeseries(df, tmp_path)
 

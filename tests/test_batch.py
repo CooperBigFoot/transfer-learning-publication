@@ -62,7 +62,7 @@ class TestBatch:
         batch_size = X.shape[0]
         output_length = y.shape[1]
         future = torch.empty(batch_size, output_length, 0)  # Empty future tensor
-        
+
         batch = Batch(
             X=X,
             y=y,

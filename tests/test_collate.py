@@ -24,12 +24,12 @@ class TestCollate:
             X = torch.randn(input_length, n_input_features)
             y = torch.randn(output_length)
             static = torch.randn(n_static_features)
-            
+
             if with_future and n_future_features > 0:
                 future = torch.randn(output_length, n_future_features)
             else:
                 future = torch.empty(output_length, 0)  # Always use empty tensor, never None
-                
+
             return Sample(
                 X=X,
                 y=y,
@@ -220,7 +220,7 @@ class TestCollate:
             y = torch.ones(5) * (i + 10)
             static = torch.ones(2) * (i + 20)
             future = torch.ones(5, 1) * (i + 30)
-            
+
             sample = Sample(
                 X=X,
                 y=y,
@@ -273,25 +273,25 @@ class TestCollate:
                 input_end_date=1000 + i,
             )
             samples.append(sample)
-        
+
         # Collate should work without special handling
         batch = collate_samples(samples)
-        
+
         # Verify batch properties
         assert batch.future.shape == (3, 5, 0)
         assert batch.n_future_features == 0
         assert batch.future.numel() == 0
-        
+
         # Test device transfer works
         device = torch.device("cpu")
         batch_moved = batch.to(device)
         assert batch_moved.future.shape == (3, 5, 0)
         assert batch_moved.future.device.type == "cpu"
-        
+
         # Test as_dict works
         batch_dict = batch.as_dict()
         assert batch_dict["future"].shape == (3, 5, 0)
-        
+
         # Verify other tensors are unaffected
         assert batch.X.shape == (3, 10, 4)
         assert batch.y.shape == (3, 5)
