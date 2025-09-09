@@ -30,7 +30,10 @@
       "Bash(sed:*)",
       "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/data_type=timeseries/**)",
       "mcp__ide__executeCode",
-      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/**)"
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/**)",
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/**)",
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/val/**)",
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/**)"
     ],
     "deny": [],
     "ask": []

@@ -1,9 +1,9 @@
 import logging
 from pathlib import Path
 
+import lightning as pl
 import torch
 import yaml
-from lightning import LightningDataModule
 from torch.utils.data import DataLoader
 
 from ..containers import (
@@ -17,7 +17,7 @@ from .lsh_dataset import LSHDataset
 
 logger = logging.getLogger(__name__)
 
-class LSHDataModule(LightningDataModule):
+class LSHDataModule(pl.LightningDataModule):
     """
     PyTorch Lightning DataModule for time series forecasting.
 

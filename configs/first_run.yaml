@@ -1,0 +1,45 @@
+data:
+  base_path: "/Users/cooper/Desktop/first-test"
+  gauge_ids: ["tajikkyrgyz_15013", "tajikkyrgyz_15016", "tajikkyrgyz_15020"]
+
+features:
+  forcing:
+    [
+      "temperature_2m_max",
+      "temperature_2m_min",
+      "potential_evaporation_sum_FAO_PENMAN_MONTEITH",
+      "potential_evaporation_sum_ERA5_LAND",
+      "temperature_2m_mean",
+      "total_precipitation_sum",
+      "streamflow",
+      "streamflow_was_filled",
+      "sin_day_of_year",
+      "cos_day_of_year",
+    ]
+  static:
+    [
+      "p_mean",
+      "area",
+      "ele_mt_sav",
+      "high_prec_dur",
+      "frac_snow",
+      "high_prec_freq",
+      "slp_dg_sav",
+      "cly_pc_sav",
+      "aridity_ERA5_LAND",
+      "aridity_FAO_PM",
+    ]
+  target: "streamflow"
+
+sequence:
+  input_length: 30
+  output_length: 10
+
+data_preparation:
+  is_autoregressive: true
+
+model:
+  type: "tide"
+
+dataloader:
+  batch_size: 1024

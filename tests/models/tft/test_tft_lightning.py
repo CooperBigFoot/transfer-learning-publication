@@ -1,7 +1,7 @@
 """Tests for TFT Lightning module."""
 
 import pytest
-import pytorch_lightning as pl
+import lightning as pl
 import torch
 
 from transfer_learning_publication.contracts import Batch, ForecastOutput
