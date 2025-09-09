@@ -6,10 +6,8 @@ import pytorch_lightning as pl
 
 from transfer_learning_publication.contracts import Batch, ForecastOutput
 from transfer_learning_publication.models.base import BaseLitModel, BaseConfig
-from transfer_learning_publication.models.dummy import (
-    LitNaiveLastValue,
-    NaiveLastValueConfig,
-)
+from transfer_learning_publication.models.dummy import NaiveLastValueConfig
+from transfer_learning_publication.models.dummy.lightning import LitNaiveLastValue
 
 
 class TestBaseLitModel:

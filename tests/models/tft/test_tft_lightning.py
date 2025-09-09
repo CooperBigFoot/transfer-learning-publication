@@ -5,7 +5,8 @@ import torch
 import pytorch_lightning as pl
 
 from transfer_learning_publication.contracts import Batch, ForecastOutput
-from transfer_learning_publication.models.tft import TFTConfig, LitTFT, TemporalFusionTransformer
+from transfer_learning_publication.models.tft import TFTConfig, TemporalFusionTransformer
+from transfer_learning_publication.models.tft.lightning import LitTFT
 
 
 class TestLitTFT:

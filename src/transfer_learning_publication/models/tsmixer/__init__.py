@@ -11,7 +11,6 @@ This module provides implementations for:
 """
 
 from .config import TSMixerConfig
-from .lightning import LitTSMixer
 from .model import (
     AlignmentStage,
     ConditionalFeatureMixing,
@@ -27,7 +26,6 @@ from .model import (
 __all__ = [
     "TSMixerConfig",
     "TSMixer",
-    "LitTSMixer",
     "MixingStage",
     "TSMixerHead",
     "AlignmentStage",

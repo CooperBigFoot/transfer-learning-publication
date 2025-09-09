@@ -12,7 +12,6 @@ This module provides implementations for:
 """
 
 from .config import TFTConfig
-from .lightning import LitTFT
 from .model import (
     GLU,
     GatedResidualNetwork,
@@ -30,5 +29,4 @@ __all__ = [
     "StaticCovariateEncoder",
     "InterpretableMultiHeadAttention",
     "GLU",
-    "LitTFT",
 ]

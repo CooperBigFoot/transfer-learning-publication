@@ -3,7 +3,8 @@
 import torch
 
 from transfer_learning_publication.contracts.batch import Batch
-from transfer_learning_publication.models.tide import LitTiDE, TiDEConfig
+from transfer_learning_publication.models.tide import TiDEConfig
+from transfer_learning_publication.models.tide.lightning import LitTiDE
 
 
 class TestLitTiDE:

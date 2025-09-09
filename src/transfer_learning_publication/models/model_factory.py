@@ -7,6 +7,7 @@ from .base.base_config import BaseConfig
 from .base.base_lit_model import BaseLitModel
 
 _MODELS: dict[str, tuple[type[BaseLitModel], type[BaseConfig]]] = {}
+_MODELS_REGISTERED = False
 
 
 def register_model(name: str, config_class: type[BaseConfig] | None = None):
@@ -132,6 +133,9 @@ class ModelFactory:
         Example:
             model = ModelFactory.create("tide", Path("configs/experiment.yaml"))
         """
+        # Ensure models are registered
+        _ensure_models_registered()
+        
         # Validate model exists
         if name not in _MODELS:
             available = list(_MODELS.keys())
@@ -176,6 +180,8 @@ class ModelFactory:
             available_models = ModelFactory.list_available()
             # Returns: ["dummy", "ealstm", "tft", "tide", "tsmixer", ...]
         """
+        # Ensure models are registered
+        _ensure_models_registered()
         return sorted(_MODELS.keys())
 
     @staticmethod
@@ -191,6 +197,9 @@ class ModelFactory:
         Raises:
             ValueError: If model name not found in registry
         """
+        # Ensure models are registered
+        _ensure_models_registered()
+        
         if name not in _MODELS:
             available = list(_MODELS.keys())
             raise ValueError(f"Model '{name}' not found in registry. Available models: {sorted(available)}")
@@ -199,21 +208,28 @@ class ModelFactory:
         return config_class
 
 
-# Import all models to trigger registration
-# This section must be at the bottom after the decorator is defined
-# When adding a new model, add its import here
-
-# Import individual models - they will self-register via decorator
-# noqa: E402, F401 - Late imports needed for registration
-from .dummy.lightning import LitNaiveLastValue  # noqa: E402, F401
-from .ealstm.lightning import LitEALSTM  # noqa: E402, F401
-from .tft.lightning import LitTFT  # noqa: E402, F401
-from .tide.lightning import LitTiDE  # noqa: E402, F401
-from .tsmixer.lightning import LitTSMixer  # noqa: E402, F401
+def _ensure_models_registered():
+    """Ensure all models are registered by importing them.
+    
+    This function is called lazily to avoid circular imports.
+    Models self-register via the @register_model decorator when imported.
+    """
+    global _MODELS_REGISTERED
+    if _MODELS_REGISTERED:
+        return
+    
+    # Import individual models - they will self-register via decorator
+    from .dummy.lightning import LitNaiveLastValue  # noqa: F401
+    from .ealstm.lightning import LitEALSTM  # noqa: F401
+    from .tft.lightning import LitTFT  # noqa: F401
+    from .tide.lightning import LitTiDE  # noqa: F401
+    from .tsmixer.lightning import LitTSMixer  # noqa: F401
+    
+    _MODELS_REGISTERED = True
 
 # Note: When adding new models, remember to:
 # 1. Add the @register_model decorator to the Lightning module
-# 2. Import the model here
+# 2. Add the import in _ensure_models_registered() function above
 # 3. The model will automatically appear in the factory
 
 __all__ = [

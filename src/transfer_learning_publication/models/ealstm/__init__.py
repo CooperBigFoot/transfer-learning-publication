@@ -13,7 +13,6 @@ This module provides implementations for:
 """
 
 from .config import EALSTMConfig
-from .lightning import LitEALSTM
 from .model import EALSTM, BiEALSTM, EALSTMCell
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "EALSTM",
     "EALSTMCell",
     "BiEALSTM",
-    "LitEALSTM",
 ]

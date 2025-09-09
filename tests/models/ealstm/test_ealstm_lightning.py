@@ -8,8 +8,8 @@ from transfer_learning_publication.models.ealstm import (
     EALSTM,
     BiEALSTM,
     EALSTMConfig,
-    LitEALSTM,
 )
+from transfer_learning_publication.models.ealstm.lightning import LitEALSTM
 
 
 class TestLitEALSTM:

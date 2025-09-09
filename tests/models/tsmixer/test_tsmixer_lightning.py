@@ -3,7 +3,8 @@
 import torch
 
 from transfer_learning_publication.contracts.batch import Batch
-from transfer_learning_publication.models.tsmixer import LitTSMixer, TSMixerConfig
+from transfer_learning_publication.models.tsmixer import TSMixerConfig
+from transfer_learning_publication.models.tsmixer.lightning import LitTSMixer
 
 
 class TestLitTSMixer:
