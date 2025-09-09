@@ -141,18 +141,18 @@ dataloader:
 # data:
 #   base_path: "/data/processed"
 #   gauge_ids_file: "/experiments/basin_subset_5000.txt"
-# 
+
 # features:
 #   forcing: ["streamflow", "precipitation", "temperature"]
 #   static: ["area", "elevation"]
 #   target: "streamflow"
-# 
+
 # sequence:
 #   input_length: 365
 #   output_length: 1
-# 
+
 # model:
 #   is_autoregressive: true
-# 
+
 # dataloader:
 #   batch_size: 32

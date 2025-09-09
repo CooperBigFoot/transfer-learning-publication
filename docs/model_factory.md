@@ -89,8 +89,9 @@ To register a new model with the factory:
 ### 1. Create Your Model Components
 
 Follow the conventions in `docs/model_implementation_guidelines.md`:
+
 - Configuration class extending `BaseConfig`
-- Core model (nn.Module) 
+- Core model (nn.Module)
 - Lightning wrapper extending `BaseLitModel`
 
 ### 2. Register with the Factory
@@ -175,7 +176,7 @@ config_path = Path("configs/experiment.yaml")
 model = ModelFactory.create("tide", config_path)
 
 # 3. Create data module (uses same YAML)
-datamodule = LSHDataModule.from_yaml(config_path)
+datamodule = LSHDataModule(config_path)
 
 # 4. Train with PyTorch Lightning
 trainer = L.Trainer(
@@ -235,13 +236,16 @@ The factory design prioritizes:
 Create a model instance from YAML configuration.
 
 **Parameters:**
+
 - `name`: Registered model name (e.g., "tide", "ealstm")
 - `yaml_path`: Path to YAML configuration file
 
 **Returns:**
+
 - Instantiated Lightning module ready for training
 
 **Raises:**
+
 - `ValueError`: If model name not found in registry
 - `FileNotFoundError`: If YAML file doesn't exist
 - `yaml.YAMLError`: If YAML file is invalid
@@ -255,12 +259,15 @@ Get sorted list of all registered model names.
 Get the configuration class for a specific model.
 
 **Parameters:**
+
 - `name`: Registered model name
 
 **Returns:**
+
 - Configuration class for the model
 
 **Raises:**
+
 - `ValueError`: If model name not found in registry
 
 ### `@register_model(name: str, config_class: Type[BaseConfig] = None)`
@@ -268,10 +275,12 @@ Get the configuration class for a specific model.
 Decorator to register a model with the factory.
 
 **Parameters:**
+
 - `name`: Unique identifier for the model
 - `config_class`: Configuration class (defaults to BaseConfig if not provided)
 
 **Example:**
+
 ```python
 @register_model("my_model", config_class=MyModelConfig)
 class LitMyModel(BaseLitModel):
