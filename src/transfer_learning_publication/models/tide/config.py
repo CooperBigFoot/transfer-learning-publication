@@ -14,7 +14,6 @@ class TiDEConfig(BaseConfig):
     https://arxiv.org/pdf/2304.08424
     """
 
-    # Define model-specific parameters - removed hidden_size and dropout as they should be standard
     MODEL_PARAMS: ClassVar[list[str]] = [
         "num_encoder_layers",
         "num_decoder_layers",
@@ -86,7 +85,6 @@ class TiDEConfig(BaseConfig):
             **kwargs,
         )
 
-        # Set only model-specific parameters
         self.hidden_size = hidden_size
         self.dropout = dropout
         self.num_encoder_layers = num_encoder_layers
@@ -99,7 +97,6 @@ class TiDEConfig(BaseConfig):
         self.scheduler_patience = scheduler_patience
         self.scheduler_factor = scheduler_factor
 
-        # Validate parameters
         if self.num_encoder_layers < 1:
             raise ValueError("num_encoder_layers must be at least 1")
         if self.num_decoder_layers < 1:
