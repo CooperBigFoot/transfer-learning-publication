@@ -9,8 +9,13 @@ The model factory provides a centralized registry and creation system for all ti
 ```python
 from pathlib import Path
 from transfer_learning_publication.models.model_factory import ModelFactory
+from transfer_learning_publication.data import LSHDataModule
 
-# Create a model from YAML configuration
+# New way: Create model from experiment configuration
+model = ModelFactory.create_from_config("experiments/tide_365_10.yaml")
+datamodule = LSHDataModule("experiments/tide_365_10.yaml")
+
+# Or the traditional way: Create model with explicit type and config
 model = ModelFactory.create("tide", Path("configs/experiment.yaml"))
 
 # The model is ready for training with PyTorch Lightning
@@ -31,7 +36,9 @@ config_class = ModelFactory.get_config_class("tide")
 
 ## YAML Configuration Structure
 
-The factory expects YAML files with the following structure:
+### Experiment Configuration (New)
+
+The new `create_from_config()` method expects experiment configurations with this structure:
 
 ```yaml
 # Sequence configuration
@@ -60,16 +67,67 @@ features:
   # Target variable to predict
   target: "streamflow"
 
-# Model-specific parameters (optional)
+# Data preparation settings
+data_preparation:
+  is_autoregressive: true    # Whether to include target in inputs
+  include_dates: false       # Whether to include timestamps
+
+# Model configuration
 model:
-  hidden_size: 128
-  dropout: 0.1
-  num_layers: 2
-  # ... any other model-specific parameters
+  type: "tide"                                    # Required: model architecture
+  config_file: "configs/models/tide_best.yaml"    # Optional: external hyperparameters
+  overrides:                                       # Optional: experiment-specific overrides
+    learning_rate: 0.001
+    dropout: 0.2
 
 # Training parameters (optional)
 training:
-  learning_rate: 0.001
+  learning_rate: 0.001  # Note: will be overridden by model.overrides if present
+```
+
+### External Hyperparameter Files
+
+Hyperparameter files (referenced by `model.config_file`) contain model-specific parameters:
+
+```yaml
+# Example: configs/models/tide_best.yaml
+hidden_size: 128
+dropout: 0.1
+num_encoder_layers: 2
+decoder_output_size: 16
+temporal_decoder_hidden_size: 32
+learning_rate: 0.0005
+```
+
+### Parameter Priority
+
+When using `create_from_config()`, parameters are merged with this priority:
+
+1. **Highest**: `model.overrides` - Experiment-specific tweaks
+2. **Middle**: `model.config_file` - Tuned hyperparameters from external file
+3. **Lowest**: Model defaults - Built-in default values
+
+Data-derived parameters (input_len, output_len, etc.) are always extracted from the experiment config.
+
+### Legacy Configuration (for `create()` method)
+
+The traditional `create()` method still works with the original format:
+
+```yaml
+# Direct model parameters embedded in config
+sequence:
+  input_length: 365
+  output_length: 10
+
+features:
+  forcing: ["streamflow", "precipitation"]
+  static: ["area"]
+  target: "streamflow"
+
+model:
+  hidden_size: 128
+  dropout: 0.1
+  # ... other model-specific parameters
 ```
 
 ## Available Models
@@ -162,6 +220,8 @@ ModelFactory.create("tide", "invalid.yaml")
 
 ## Example: Complete Workflow
 
+### Using the New Experiment-Based Approach
+
 ```python
 from pathlib import Path
 from transfer_learning_publication.models.model_factory import ModelFactory
@@ -171,14 +231,12 @@ import lightning as L
 # 1. List available models
 print("Available models:", ModelFactory.list_available())
 
-# 2. Create model from YAML
-config_path = Path("configs/experiment.yaml")
-model = ModelFactory.create("tide", config_path)
-
-# 3. Create data module (uses same YAML)
+# 2. Create model and datamodule from same experiment config
+config_path = "experiments/tide_365_10.yaml"
+model = ModelFactory.create_from_config(config_path)
 datamodule = LSHDataModule(config_path)
 
-# 4. Train with PyTorch Lightning
+# 3. Train with PyTorch Lightning
 trainer = L.Trainer(
     max_epochs=100,
     accelerator="gpu",
@@ -186,8 +244,35 @@ trainer = L.Trainer(
 )
 trainer.fit(model, datamodule)
 
-# 5. Test the model
+# 4. Test the model
 trainer.test(model, datamodule)
+```
+
+### Using External Hyperparameters with Overrides
+
+```python
+# Your experiment config (experiments/tsmixer_tuning.yaml) might have:
+# model:
+#   type: "tsmixer"
+#   config_file: "configs/models/tsmixer_best.yaml"
+#   overrides:
+#     learning_rate: 0.0001  # Override for this specific experiment
+
+model = ModelFactory.create_from_config("experiments/tsmixer_tuning.yaml")
+# This will:
+# 1. Load hyperparameters from configs/models/tsmixer_best.yaml
+# 2. Override learning_rate with 0.0001
+# 3. Extract data parameters from the experiment config
+# 4. Create the TSMixer model with merged configuration
+```
+
+### Legacy Approach (Still Supported)
+
+```python
+# Traditional way with explicit model type
+model = ModelFactory.create("tide", "configs/experiment.yaml")
+datamodule = LSHDataModule("configs/experiment.yaml")
+trainer.fit(model, datamodule)
 ```
 
 ## Testing the Factory
@@ -208,6 +293,42 @@ The factory design prioritizes:
 4. **Extensibility**: Easy to add new models
 5. **Type safety**: Proper type hints throughout
 6. **Clear errors**: Helpful error messages for common issues
+
+## Migration Guide
+
+### Migrating from Old to New Configuration Structure
+
+If you have existing configurations using the old structure, here's how to migrate:
+
+**Old Structure:**
+```yaml
+model:
+  is_autoregressive: true
+  include_dates: false
+  hidden_size: 128
+  dropout: 0.1
+```
+
+**New Structure:**
+```yaml
+data_preparation:
+  is_autoregressive: true
+  include_dates: false
+
+model:
+  type: "tide"
+  overrides:  # Or use config_file for external params
+    hidden_size: 128
+    dropout: 0.1
+```
+
+### Best Practices
+
+1. **Organize Hyperparameters**: Keep tuned hyperparameters in `configs/models/` directory
+2. **Name Experiments Clearly**: Use descriptive names like `tide_365_10_camels.yaml`
+3. **Document Overrides**: Add comments explaining why specific overrides are used
+4. **Version Control**: Track both experiment configs and hyperparameter files
+5. **Reuse Hyperparameters**: Share successful hyperparameters across experiments via `config_file`
 
 ## Troubleshooting
 
@@ -231,9 +352,34 @@ The factory design prioritizes:
 
 ## API Reference
 
+### `ModelFactory.create_from_config(config_path: Path | str) -> BaseLitModel`
+
+Create a model instance from an experiment configuration file.
+
+**Parameters:**
+
+- `config_path`: Path to experiment configuration file
+
+**Returns:**
+
+- Instantiated Lightning module ready for training
+
+**Raises:**
+
+- `ValueError`: If `model.type` not found in config or model not in registry
+- `FileNotFoundError`: If config file or external hyperparameter file doesn't exist
+- `yaml.YAMLError`: If YAML file is invalid
+
+**Example:**
+
+```python
+# Experiment config with external hyperparameters
+model = ModelFactory.create_from_config("experiments/tide_365_10.yaml")
+```
+
 ### `ModelFactory.create(name: str, yaml_path: Path | str) -> BaseLitModel`
 
-Create a model instance from YAML configuration.
+Create a model instance from YAML configuration (legacy method).
 
 **Parameters:**
 

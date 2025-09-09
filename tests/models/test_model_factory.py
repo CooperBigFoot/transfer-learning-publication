@@ -191,6 +191,326 @@ class TestExtractConfig:
         assert config["hidden_size"] == 128
 
 
+class TestCreateFromConfig:
+    """Test suite for ModelFactory.create_from_config method."""
+    
+    def test_create_from_config_basic(self):
+        """Test creating a model from experiment config."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 30,
+                "output_length": 7,
+            },
+            "features": {
+                "forcing": ["streamflow", "precipitation", "temperature"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "data_preparation": {
+                "is_autoregressive": True,
+                "include_dates": False,
+            },
+            "model": {
+                "type": "tide",
+                "overrides": {
+                    "hidden_size": 64,
+                    "dropout": 0.1,
+                }
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            # Create model
+            model = ModelFactory.create_from_config(yaml_path)
+            
+            # Check model is created
+            assert model is not None
+            assert hasattr(model, "model")
+            assert hasattr(model, "config")
+            
+            # Check config values
+            assert model.config.input_len == 30
+            assert model.config.output_len == 7
+            assert model.config.input_size == 3
+            assert model.config.static_size == 1
+            assert model.config.hidden_size == 64
+            assert model.config.dropout == 0.1
+            
+            # Test forward pass
+            x = torch.randn(2, 30, 3)
+            static = torch.randn(2, 1)
+            output = model(x, static)
+            assert output.shape == (2, 7, 1)
+            
+        finally:
+            yaml_path.unlink()
+    
+    def test_create_from_config_with_external_file(self):
+        """Test loading external hyperparameter file."""
+        # Create external hyperparameter file
+        hyperparams = {
+            "hidden_size": 128,
+            "dropout": 0.2,
+            "num_encoder_layers": 3,
+            "learning_rate": 0.001,
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='_hyperparams.yaml', delete=False) as f:
+            yaml.dump(hyperparams, f)
+            hyperparam_path = Path(f.name)
+        
+        # Create experiment config referencing external file
+        yaml_content = {
+            "sequence": {
+                "input_length": 20,
+                "output_length": 5,
+            },
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "target": "streamflow",
+            },
+            "model": {
+                "type": "tide",
+                "config_file": str(hyperparam_path),  # Reference external file
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            model = ModelFactory.create_from_config(yaml_path)
+            
+            # Check that hyperparameters from external file were loaded
+            assert model.config.hidden_size == 128
+            assert model.config.dropout == 0.2
+            assert model.config.num_encoder_layers == 3
+            assert model.config.learning_rate == 0.001
+            
+            # Check data-derived params still work
+            assert model.config.input_len == 20
+            assert model.config.output_len == 5
+            
+        finally:
+            yaml_path.unlink()
+            hyperparam_path.unlink()
+    
+    def test_create_from_config_overrides_priority(self):
+        """Test that overrides take precedence over external config."""
+        # Create external hyperparameter file
+        hyperparams = {
+            "hidden_size": 128,
+            "dropout": 0.2,
+            "learning_rate": 0.001,
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='_hyperparams.yaml', delete=False) as f:
+            yaml.dump(hyperparams, f)
+            hyperparam_path = Path(f.name)
+        
+        # Create experiment config with overrides
+        yaml_content = {
+            "sequence": {
+                "input_length": 15,
+                "output_length": 3,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            "model": {
+                "type": "tide",
+                "config_file": str(hyperparam_path),
+                "overrides": {
+                    "dropout": 0.3,  # Override external value
+                    "new_param": 42,  # Add new parameter
+                }
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            model = ModelFactory.create_from_config(yaml_path)
+            
+            # Check override took precedence
+            assert model.config.dropout == 0.3
+            
+            # Check non-overridden param from external file
+            assert model.config.hidden_size == 128
+            assert model.config.learning_rate == 0.001
+            
+            # New param might not be in config if not in MODEL_PARAMS
+            # But it should have been passed through
+            
+        finally:
+            yaml_path.unlink()
+            hyperparam_path.unlink()
+    
+    def test_create_from_config_missing_model_section(self):
+        """Test error when model section is missing."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 1,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            # Missing model section
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            with pytest.raises(ValueError, match="Missing 'model' section"):
+                ModelFactory.create_from_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+    
+    def test_create_from_config_missing_model_type(self):
+        """Test error when model.type is missing."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 1,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            "model": {
+                # Missing type field
+                "overrides": {
+                    "hidden_size": 64,
+                }
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            with pytest.raises(ValueError, match="Missing 'model.type'"):
+                ModelFactory.create_from_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+    
+    def test_create_from_config_invalid_model_type(self):
+        """Test error with invalid model type."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 1,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            "model": {
+                "type": "nonexistent_model",
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            with pytest.raises(ValueError, match="Model 'nonexistent_model' not found"):
+                ModelFactory.create_from_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+    
+    def test_create_from_config_missing_external_file(self):
+        """Test error when external config file doesn't exist."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 1,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            "model": {
+                "type": "tide",
+                "config_file": "/nonexistent/file.yaml",
+            }
+        }
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+        
+        try:
+            with pytest.raises(FileNotFoundError, match="Hyperparameter file not found"):
+                ModelFactory.create_from_config(yaml_path)
+        finally:
+            yaml_path.unlink()
+    
+    def test_create_from_config_relative_path(self):
+        """Test that relative paths work for config_file."""
+        # Create a temporary directory structure
+        import os
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            
+            # Create subdirectories
+            configs_dir = tmpdir / "configs"
+            configs_dir.mkdir()
+            models_dir = configs_dir / "models"
+            models_dir.mkdir()
+            
+            # Create hyperparameter file
+            hyperparams = {
+                "hidden_size": 256,
+                "dropout": 0.15,
+            }
+            hyperparam_path = models_dir / "tide_params.yaml"
+            with open(hyperparam_path, 'w') as f:
+                yaml.dump(hyperparams, f)
+            
+            # Create experiment config with relative path
+            yaml_content = {
+                "sequence": {
+                    "input_length": 10,
+                    "output_length": 1,
+                },
+                "features": {
+                    "forcing": ["streamflow"],
+                    "target": "streamflow",
+                },
+                "model": {
+                    "type": "tide",
+                    "config_file": "models/tide_params.yaml",  # Relative path
+                }
+            }
+            
+            config_path = configs_dir / "experiment.yaml"
+            with open(config_path, 'w') as f:
+                yaml.dump(yaml_content, f)
+            
+            # Create model
+            model = ModelFactory.create_from_config(config_path)
+            
+            # Check hyperparameters were loaded
+            assert model.config.hidden_size == 256
+            assert model.config.dropout == 0.15
+
+
 class TestModelFactory:
     """Test suite for ModelFactory class methods."""
 

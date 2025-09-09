@@ -72,7 +72,7 @@ class LSHDataModule(LightningDataModule):
             config = yaml.safe_load(f)
 
         # Basic validation
-        required_keys = ["data", "features", "sequence", "model", "dataloader"]
+        required_keys = ["data", "features", "sequence", "data_preparation", "dataloader"]
         for key in required_keys:
             if key not in config:
                 raise ValueError(f"Missing required config section: {key}")
@@ -108,8 +108,8 @@ class LSHDataModule(LightningDataModule):
         if "output_length" not in config["sequence"]:
             raise ValueError("Missing required config: sequence.output_length")
 
-        if "is_autoregressive" not in config["model"]:
-            raise ValueError("Missing required config: model.is_autoregressive")
+        if "is_autoregressive" not in config["data_preparation"]:
+            raise ValueError("Missing required config: data_preparation.is_autoregressive")
 
         if "batch_size" not in config["dataloader"]:
             raise ValueError("Missing required config: dataloader.batch_size")
@@ -299,7 +299,7 @@ class LSHDataModule(LightningDataModule):
             future_indices.append(feature_names.index(name))
 
         # Determine input features based on autoregressive mode
-        if config["model"]["is_autoregressive"]:
+        if config["data_preparation"]["is_autoregressive"]:
             # In autoregressive mode, all forcing features are inputs
             # CRITICAL: Target must be first (index 0) for autoregressive models
             if target_idx in forcing_indices:
@@ -325,8 +325,8 @@ class LSHDataModule(LightningDataModule):
             forcing_indices=forcing_indices,
             future_indices=future_indices if future_indices else None,
             input_feature_indices=input_feature_indices,
-            is_autoregressive=config["model"]["is_autoregressive"],
-            include_dates=config["model"].get("include_dates", False),
+            is_autoregressive=config["data_preparation"]["is_autoregressive"],
+            include_dates=config["data_preparation"].get("include_dates", False),
             group_identifier_name="gauge_id",
         )
 
@@ -432,4 +432,4 @@ class LSHDataModule(LightningDataModule):
     @property
     def is_autoregressive(self) -> bool:
         """Whether the model is autoregressive."""
-        return self.config["model"]["is_autoregressive"]
+        return self.config["data_preparation"]["is_autoregressive"]

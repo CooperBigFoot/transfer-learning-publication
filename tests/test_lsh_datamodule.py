@@ -23,7 +23,7 @@ class TestLSHDataModule:
                 "target": "feature1",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -52,7 +52,7 @@ class TestLSHDataModule:
         config = {
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -70,7 +70,7 @@ class TestLSHDataModule:
             "data": {"region": "test"},
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -88,7 +88,7 @@ class TestLSHDataModule:
             "data": {"base_path": "/data"},  # Missing region, gauge_ids, or gauge_ids_file
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -108,7 +108,7 @@ class TestLSHDataModule:
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -138,7 +138,7 @@ class TestLSHDataModule:
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -162,7 +162,7 @@ class TestLSHDataModule:
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -190,7 +190,7 @@ class TestLSHDataModule:
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -215,7 +215,7 @@ class TestLSHDataModule:
                 "future": ["temperature"],
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True, "include_dates": True},
+            "data_preparation": {"is_autoregressive": True, "include_dates": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -252,7 +252,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -285,7 +285,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": False},  # Non-autoregressive with target in forcing
+            "data_preparation": {"is_autoregressive": False},  # Non-autoregressive with target in forcing
             "dataloader": {"batch_size": 32},
         }
 
@@ -310,7 +310,7 @@ class TestLSHDataModule:
                 "target": "streamflow",  # Not in forcing
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -339,7 +339,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -411,7 +411,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -476,7 +476,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -501,7 +501,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -537,7 +537,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {
                 "batch_size": 16,
                 "num_workers": 2,
@@ -588,7 +588,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -612,7 +612,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 365, "output_length": 7},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -645,7 +645,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
@@ -677,7 +677,7 @@ class TestLSHDataModule:
                 "target": "streamflow",
             },
             "sequence": {"input_length": 10, "output_length": 1},
-            "model": {"is_autoregressive": True},
+            "data_preparation": {"is_autoregressive": True},
             "dataloader": {"batch_size": 32},
         }
 
