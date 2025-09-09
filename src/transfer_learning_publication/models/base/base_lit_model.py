@@ -186,7 +186,6 @@ class BaseLitModel(pl.LightningModule):
                 mode="min",
                 patience=getattr(self.config, "scheduler_patience", 5),
                 factor=getattr(self.config, "scheduler_factor", 0.5),
-                verbose=True,
             ),
             "monitor": "val_loss",
             "interval": "epoch",
