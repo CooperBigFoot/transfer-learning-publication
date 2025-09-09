@@ -1,5 +1,5 @@
 """
-PyTorch Lightning module for the RepeatLastValues model.
+PyTorch Lightning module for the NaiveLastValue model.
 """
 
 from typing import Any
@@ -7,38 +7,38 @@ from typing import Any
 import torch
 
 from ..base.base_lit_model import BaseLitModel
-from .config import RepeatLastValuesConfig
-from .model import RepeatLastValues
+from .config import NaiveLastValueConfig
+from .model import NaiveLastValue
 
 
-class LitRepeatLastValues(BaseLitModel):
-    """PyTorch Lightning Module implementation of RepeatLastValues.
+class LitNaiveLastValue(BaseLitModel):
+    """PyTorch Lightning Module implementation of NaiveLastValue.
 
     This wrapper handles training, validation, and testing procedures for the
-    RepeatLastValues model, though the model itself doesn't actually learn.
+    NaiveLastValue model, though the model itself doesn't actually learn.
     """
 
     def __init__(
         self,
-        config: RepeatLastValuesConfig | dict[str, Any],
+        config: NaiveLastValueConfig | dict[str, Any],
     ):
-        """Initialize the Lightning Module with a RepeatLastValuesConfig.
+        """Initialize the Lightning Module with a NaiveLastValueConfig.
 
         Args:
-            config: Either a RepeatLastValuesConfig object or a dictionary of config parameters
+            config: Either a NaiveLastValueConfig object or a dictionary of config parameters
         """
-        # Convert dict config to RepeatLastValuesConfig if needed
+        # Convert dict config to NaiveLastValueConfig if needed
         if isinstance(config, dict):
-            config = RepeatLastValuesConfig.from_dict(config)
+            config = NaiveLastValueConfig.from_dict(config)
 
         # Initialize base class with the config
         super().__init__(config)
 
-        # Create the RepeatLastValues model using the config
-        self.model = RepeatLastValues(config)
+        # Create the NaiveLastValue model using the config
+        self.model = NaiveLastValue(config)
 
     def forward(self, x: torch.Tensor, static: torch.Tensor = None, future: torch.Tensor = None) -> torch.Tensor:
-        """Forward pass that delegates to the RepeatLastValues model.
+        """Forward pass that delegates to the NaiveLastValue model.
 
         Args:
             x: Input time series, shape [batch_size, input_len, input_size]

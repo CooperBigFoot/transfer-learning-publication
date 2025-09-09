@@ -6,28 +6,37 @@ from torch.nn import MSELoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
+from ...contracts import Batch, ForecastOutput
 from ..layers.rev_in import RevIN
 from .base_config import BaseConfig
 
 
 class BaseLitModel(pl.LightningModule):
-    """Base Lightning module for all hydrological forecasting models with RevIN support."""
+    """Base Lightning module for time series forecasting models.
+
+    Provides standard training/validation/test steps with optional RevIN normalization.
+    All models should extend this class and implement the forward method.
+    """
 
     def __init__(self, config: BaseConfig) -> None:
-        """Initialize with a model configuration."""
+        """Initialize base model with configuration.
+
+        Args:
+            config: Model configuration containing hyperparameters
+        """
         super().__init__()
 
         self.config = config
         self.save_hyperparameters(config.to_dict())
-        self.mse_criterion = MSELoss()
-        self.test_outputs = []
-        self.test_results = None
 
-        # Initialize RevIN layer if enabled
+        self.criterion = MSELoss()
+
         if getattr(config, "use_rev_in", True):
             self.rev_in = RevIN(num_features=1, eps=1e-5, affine=True)
         else:
             self.rev_in = None
+
+        self.test_outputs = []
 
     def forward(
         self,
@@ -35,32 +44,183 @@ class BaseLitModel(pl.LightningModule):
         static: torch.Tensor | None = None,
         future: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """Forward pass to be implemented by subclasses."""
+        """Forward pass to be implemented by subclasses.
+
+        Args:
+            x: Input sequences [batch_size, input_len, input_size]
+            static: Static features [batch_size, static_size]
+            future: Future features [batch_size, output_len, future_size]
+
+        Returns:
+            Predictions [batch_size, output_len, 1]
+        """
         raise NotImplementedError("Subclasses must implement forward method")
 
+    def training_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
+        """Execute training step.
+
+        Args:
+            batch: Batch of data
+            batch_idx: Index of current batch
+
+        Returns:
+            Loss value for backpropagation
+        """
+        self._validate_batch(batch)
+
+        x_normalized = self._apply_rev_in_normalization(batch.X)
+
+        y_hat = self(x_normalized, batch.static, batch.future)
+
+        y_hat = self._apply_rev_in_denormalization(y_hat)
+
+        loss = self.criterion(y_hat, batch.y.unsqueeze(-1))
+
+        self.log("train_loss", loss, batch_size=batch.batch_size)
+
+        return loss
+
+    def validation_step(self, batch: Batch, batch_idx: int) -> torch.Tensor:
+        """Execute validation step.
+
+        Args:
+            batch: Batch of data
+            batch_idx: Index of current batch
+
+        Returns:
+            Loss value for validation
+        """
+        self._validate_batch(batch)
+
+        x_normalized = self._apply_rev_in_normalization(batch.X)
+
+        y_hat = self(x_normalized, batch.static, batch.future)
+
+        y_hat = self._apply_rev_in_denormalization(y_hat)
+
+        loss = self.criterion(y_hat, batch.y.unsqueeze(-1))
+
+        self.log("val_loss", loss, batch_size=batch.batch_size, prog_bar=True)
+
+        return loss
+
+    def test_step(self, batch: Batch, batch_idx: int) -> dict[str, Any]:
+        """Execute test step and collect outputs.
+
+        Args:
+            batch: Batch of data
+            batch_idx: Index of current batch
+
+        Returns:
+            Dictionary with predictions and metadata
+        """
+        self._validate_batch(batch)
+
+        x_normalized = self._apply_rev_in_normalization(batch.X)
+
+        y_hat = self(x_normalized, batch.static, batch.future)
+
+        y_hat = self._apply_rev_in_denormalization(y_hat)
+
+        loss = self.criterion(y_hat, batch.y.unsqueeze(-1))
+        self.log("test_loss", loss, batch_size=batch.batch_size)
+
+        output = {
+            "predictions": y_hat.squeeze(-1),
+            "observations": batch.y,
+            "group_identifiers": batch.group_identifiers,
+        }
+
+        if batch.input_end_dates is not None:
+            output["input_end_dates"] = batch.input_end_dates
+
+        self.test_outputs.append(output)
+
+        return output
+
+    def on_test_epoch_start(self) -> None:
+        """Initialize test output collection."""
+        self.test_outputs = []
+
+    def on_test_epoch_end(self) -> ForecastOutput:
+        """Consolidate test outputs into ForecastOutput contract.
+
+        Returns:
+            ForecastOutput object with all test predictions
+        """
+        if not self.test_outputs:
+            raise RuntimeError("No test outputs collected")
+
+        predictions = torch.cat([o["predictions"] for o in self.test_outputs], dim=0)
+        observations = torch.cat([o["observations"] for o in self.test_outputs], dim=0)
+        group_identifiers = [gid for o in self.test_outputs for gid in o["group_identifiers"]]
+
+        input_end_dates = None
+        if "input_end_dates" in self.test_outputs[0]:
+            input_end_dates = torch.cat([o["input_end_dates"] for o in self.test_outputs], dim=0)
+
+        # Create output contract
+        forecast_output = ForecastOutput(
+            predictions=predictions,
+            observations=observations,
+            group_identifiers=group_identifiers,
+            input_end_dates=input_end_dates,
+        )
+
+        # Clear temporary storage
+        self.test_outputs = []
+
+        return forecast_output
+
+    def configure_optimizers(self) -> dict[str, Any]:
+        """Configure optimizer and learning rate scheduler.
+
+        Returns:
+            Dictionary with optimizer and scheduler configuration
+        """
+        optimizer = Adam(self.parameters(), lr=self.config.learning_rate)
+
+        scheduler_config = {
+            "scheduler": ReduceLROnPlateau(
+                optimizer,
+                mode="min",
+                patience=getattr(self.config, "scheduler_patience", 5),
+                factor=getattr(self.config, "scheduler_factor", 0.5),
+                verbose=True,
+            ),
+            "monitor": "val_loss",
+            "interval": "epoch",
+            "frequency": 1,
+        }
+
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": scheduler_config,
+        }
+
     def _apply_rev_in_normalization(self, x: torch.Tensor) -> torch.Tensor:
-        """Apply RevIN normalization to the target feature only.
+        """Apply RevIN normalization to target feature only.
 
         Args:
             x: Input tensor [batch_size, input_len, input_size]
 
         Returns:
-            Tensor with normalized target feature and unchanged other features
+            Tensor with normalized target feature (position 0)
         """
         if self.rev_in is None:
             return x
 
-        # Extract target feature (first column)
+        # Extract and normalize target feature (assumed at position 0)
         x_target = x[:, :, 0:1]  # [batch_size, input_len, 1]
-
-        # Apply RevIN normalization to target only
         x_target_normalized = self.rev_in(x_target, mode="norm")
 
-        # Reconstruct X with normalized target + unchanged other features
+        # Reconstruct tensor with normalized target
         if x.size(-1) > 1:
-            x_other_features = x[:, :, 1:]
-            x_normalized = torch.cat([x_target_normalized, x_other_features], dim=-1)
+            # Concatenate normalized target with other features
+            x_other = x[:, :, 1:]
+            x_normalized = torch.cat([x_target_normalized, x_other], dim=-1)
         else:
+            # Only target feature present
             x_normalized = x_target_normalized
 
         return x_normalized
@@ -77,148 +237,16 @@ class BaseLitModel(pl.LightningModule):
         if self.rev_in is None:
             return y_hat
 
-        # Apply RevIN denormalization
-        y_hat_denormalized = self.rev_in(y_hat, mode="denorm")
+        return self.rev_in(y_hat, mode="denorm")
 
-        return y_hat_denormalized
+    def _validate_batch(self, batch: Batch) -> None:
+        """Validate batch is correct type.
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        """Execute training step with RevIN integration."""
-        # Extract inputs
-        x, y = batch["X"], batch["y"].unsqueeze(-1)
-        static = batch.get("static")
-        future = batch.get("future")
+        Args:
+            batch: Input to validate
 
-        # Apply RevIN normalization to input if enabled
-        x_processed = self._apply_rev_in_normalization(x)
-
-        # Forward pass with potentially normalized input
-        y_hat = self(x_processed, static, future)
-
-        # Apply RevIN denormalization to predictions if enabled
-        y_hat_final = self._apply_rev_in_denormalization(y_hat)
-
-        # Calculate loss with denormalized predictions and original targets
-        loss = self._compute_loss(y_hat_final, y)
-
-        # Log metrics
-        self.log("train_loss", loss, batch_size=x.size(0))
-
-        return loss
-
-    def _compute_loss(self, predictions: torch.Tensor, targets: torch.Tensor) -> torch.Tensor:
-        """Compute loss between predictions and targets."""
-        return self.mse_criterion(predictions, targets)
-
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> dict[str, torch.Tensor]:
-        """Execute validation step with RevIN integration."""
-        # Extract inputs
-        x, y = batch["X"], batch["y"].unsqueeze(-1)
-        static = batch.get("static")
-        future = batch.get("future")
-
-        # Apply RevIN normalization to input if enabled
-        x_processed = self._apply_rev_in_normalization(x)
-
-        # Forward pass with potentially normalized input
-        y_hat = self(x_processed, static, future)
-
-        # Apply RevIN denormalization to predictions if enabled
-        y_hat_final = self._apply_rev_in_denormalization(y_hat)
-
-        # Calculate loss with denormalized predictions and original targets
-        loss = self._compute_loss(y_hat_final, y)
-
-        # Log metrics
-        self.log("val_loss", loss, batch_size=x.size(0))
-
-        return {"val_loss": loss, "preds": y_hat_final, "targets": y}
-
-    def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> dict[str, torch.Tensor]:
-        """Execute test step with RevIN integration."""
-        # Extract inputs
-        x, y = batch["X"], batch["y"].unsqueeze(-1)
-        static = batch.get("static")
-        future = batch.get("future")
-
-        # Apply RevIN normalization to input if enabled
-        x_processed = self._apply_rev_in_normalization(x)
-
-        # Forward pass with potentially normalized input
-        y_hat = self(x_processed, static, future)
-
-        # Apply RevIN denormalization to predictions if enabled
-        y_hat_final = self._apply_rev_in_denormalization(y_hat)
-
-        # Calculate loss with denormalized predictions and original targets
-        loss = self._compute_loss(y_hat_final, y)
-
-        # Log metrics
-        self.log("test_loss", loss, batch_size=x.size(0))
-
-        # Create standardized output dictionary
-        output = {
-            "predictions": y_hat_final.squeeze(-1),
-            "observations": y.squeeze(-1),
-            "basin_ids": batch[self.config.group_identifier],
-        }
-
-        # Add optional fields if present in batch
-        for field in ["input_end_date", "slice_idx"]:
-            if field in batch:
-                output[field] = batch[field]
-
-        # Store output for later processing
-        self.test_outputs.append(output)
-
-        return output
-
-    def on_test_epoch_start(self) -> None:
-        """Reset test outputs at start of test epoch."""
-        self.test_outputs = []
-        # Reset RevIN statistics for test epoch
-        if self.rev_in is not None:
-            self.rev_in.reset_statistics()
-
-    def on_test_epoch_end(self) -> None:
-        """Process test outputs at end of test epoch."""
-        if not self.test_outputs:
-            print("Warning: No test outputs collected")
-            return
-
-        # Consolidate outputs
-        self.test_results = {
-            "predictions": torch.cat([o["predictions"] for o in self.test_outputs]),
-            "observations": torch.cat([o["observations"] for o in self.test_outputs]),
-            "basin_ids": [bid for o in self.test_outputs for bid in o["basin_ids"]],
-        }
-
-        # Add optional fields if present
-        for field in ["input_end_date", "slice_idx"]:
-            if field in self.test_outputs[0]:
-                self.test_results[field] = [item for o in self.test_outputs for item in o[field]]
-
-        # Clean up temporary storage
-        self.test_outputs = []
-
-    def configure_optimizers(self) -> dict[str, Any]:
-        """Configure optimizer and learning rate scheduler."""
-        optimizer = Adam(self.parameters(), lr=self.config.learning_rate)
-
-        # Create scheduler dictionary
-        scheduler_config = {
-            "scheduler": ReduceLROnPlateau(
-                optimizer,
-                mode="min",
-                patience=getattr(self.config, "scheduler_patience", 5),
-                factor=getattr(self.config, "scheduler_factor", 0.5),
-            ),
-            "monitor": "val_loss",
-            "interval": "epoch",
-            "frequency": 1,
-        }
-
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": scheduler_config,
-        }
+        Raises:
+            TypeError: If batch is not a Batch instance
+        """
+        if not isinstance(batch, Batch):
+            raise TypeError(f"Expected Batch instance, got {type(batch)}")

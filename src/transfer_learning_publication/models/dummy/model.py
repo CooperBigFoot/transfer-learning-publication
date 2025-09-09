@@ -1,5 +1,5 @@
 """
-RepeatLastValues model implementation.
+NaiveLastValue model implementation.
 
 This is a simple baseline model that repeats the last observed value
 for the entire forecast horizon.
@@ -8,22 +8,22 @@ for the entire forecast horizon.
 import torch
 import torch.nn as nn
 
-from .config import RepeatLastValuesConfig
+from .config import NaiveLastValueConfig
 
 
-class RepeatLastValues(nn.Module):
-    """RepeatLastValues model implementation.
+class NaiveLastValue(nn.Module):
+    """NaiveLastValue model implementation.
 
     This model predicts future values by repeating the last observed value
     for the entire forecast horizon. It serves as a simple baseline against
     which more complex models can be compared.
     """
 
-    def __init__(self, config: RepeatLastValuesConfig):
-        """Initialize RepeatLastValues model.
+    def __init__(self, config: NaiveLastValueConfig):
+        """Initialize NaiveLastValue model.
 
         Args:
-            config: Configuration object for RepeatLastValues model
+            config: Configuration object for NaiveLastValue model
         """
         super().__init__()
         self.config = config

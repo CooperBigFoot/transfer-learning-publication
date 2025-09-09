@@ -80,7 +80,7 @@ class TestLSHDataModule:
 
         with pytest.raises(ValueError, match="Missing required config: data.base_path"):
             LSHDataModule(config_path)
-    
+
     def test_config_missing_basin_specification(self, tmp_path):
         """Test that config requires at least one way to specify basins."""
         # Config with base_path but no region, gauge_ids, or gauge_ids_file
@@ -98,7 +98,7 @@ class TestLSHDataModule:
 
         with pytest.raises(ValueError, match="Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"):
             LSHDataModule(config_path)
-    
+
     def test_config_with_gauge_ids_list(self, tmp_path):
         """Test configuration with explicit gauge_ids list."""
         config = {
@@ -119,7 +119,7 @@ class TestLSHDataModule:
         dm = LSHDataModule(config_path)
         assert dm.config["data"]["gauge_ids"] == ["basin1", "basin2", "basin3"]
         assert "region" not in dm.config["data"]  # Region not required
-    
+
     def test_config_with_gauge_ids_file(self, tmp_path):
         """Test configuration with gauge_ids_file."""
         # Create a file with gauge IDs
@@ -130,7 +130,7 @@ class TestLSHDataModule:
             f.write("basin3\n")
             f.write("  basin4  \n")  # Test whitespace handling
             f.write("\n")  # Empty line
-        
+
         config = {
             "data": {
                 "base_path": "/data",
@@ -148,11 +148,11 @@ class TestLSHDataModule:
 
         dm = LSHDataModule(config_path)
         assert dm.config["data"]["gauge_ids_file"] == str(gauge_ids_file)
-        
+
         # Test that _load_gauge_ids correctly loads from file
         gauge_ids = dm._load_gauge_ids()
         assert gauge_ids == ["basin1", "basin2", "basin3", "basin4"]
-    
+
     def test_config_gauge_ids_file_not_found(self, tmp_path):
         """Test error when gauge_ids_file doesn't exist."""
         config = {
@@ -172,7 +172,7 @@ class TestLSHDataModule:
 
         with pytest.raises(FileNotFoundError, match="Gauge IDs file not found"):
             LSHDataModule(config_path)
-    
+
     def test_load_gauge_ids_priority(self, tmp_path):
         """Test that gauge_ids_file takes priority over gauge_ids list."""
         # Create a file with gauge IDs
@@ -180,7 +180,7 @@ class TestLSHDataModule:
         with open(gauge_ids_file, "w") as f:
             f.write("file_basin1\n")
             f.write("file_basin2\n")
-        
+
         config = {
             "data": {
                 "base_path": "/data",
@@ -385,7 +385,7 @@ class TestLSHDataModule:
 
         # Verify CaravanDataSource was initialized with region=None (no region filter)
         mock_caravan_class.assert_called_with(base_path=tmp_path / "train", region=None)
-        
+
         # Verify the explicit gauge IDs were used
         mock_caravan.get_timeseries.assert_called_with(
             gauge_ids=["gauge1", "gauge2", "gauge3"],
@@ -395,7 +395,7 @@ class TestLSHDataModule:
             gauge_ids=["gauge1", "gauge2", "gauge3"],
             columns=["area"]
         )
-        
+
         # list_gauge_ids should NOT have been called since we provided explicit IDs
         mock_caravan.list_gauge_ids.assert_not_called()
 
