@@ -53,35 +53,26 @@ class LSHDataContainer:
         n_features = self.time_series.get_n_features()
 
         if self.config.target_idx is not None and not 0 <= self.config.target_idx < n_features:
-            raise ValueError(
-                f"Target index {self.config.target_idx} out of bounds [0, {n_features})"
-            )
+            raise ValueError(f"Target index {self.config.target_idx} out of bounds [0, {n_features})")
 
         if self.config.forcing_indices:
             invalid = [i for i in self.config.forcing_indices if not 0 <= i < n_features]
             if invalid:
-                raise ValueError(
-                    f"Forcing indices {invalid} out of bounds [0, {n_features})"
-                )
+                raise ValueError(f"Forcing indices {invalid} out of bounds [0, {n_features})")
 
         if self.config.future_indices:
             invalid = [i for i in self.config.future_indices if not 0 <= i < n_features]
             if invalid:
-                raise ValueError(
-                    f"Future indices {invalid} out of bounds [0, {n_features})"
-                )
+                raise ValueError(f"Future indices {invalid} out of bounds [0, {n_features})")
 
         if self.config.input_feature_indices:
             invalid = [i for i in self.config.input_feature_indices if not 0 <= i < n_features]
             if invalid:
-                raise ValueError(
-                    f"Input feature indices {invalid} out of bounds [0, {n_features})"
-                )
+                raise ValueError(f"Input feature indices {invalid} out of bounds [0, {n_features})")
 
         # Validate static features match
         n_static = self.static_attributes.get_n_attributes()
         if len(self.config.static_features) != n_static:
             raise ValueError(
-                f"Config has {len(self.config.static_features)} static features, "
-                f"but static_attributes has {n_static}"
+                f"Config has {len(self.config.static_features)} static features, but static_attributes has {n_static}"
             )

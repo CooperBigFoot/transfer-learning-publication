@@ -18,8 +18,6 @@ class EALSTMConfig(BaseConfig):
     MODEL_PARAMS: ClassVar[list[str]] = [
         "num_layers",
         "bias",
-        "scheduler_patience",
-        "scheduler_factor",
         "dropout",
         "hidden_size",
         # Bidirectional EA-LSTM parameters
@@ -82,6 +80,8 @@ class EALSTMConfig(BaseConfig):
             future_input_size=future_input_size,
             learning_rate=learning_rate,
             group_identifier=group_identifier,
+            scheduler_patience=scheduler_patience,
+            scheduler_factor=scheduler_factor,
             **kwargs,
         )
 
@@ -90,8 +90,6 @@ class EALSTMConfig(BaseConfig):
         self.dropout = dropout
         self.num_layers = num_layers
         self.bias = bias
-        self.scheduler_patience = scheduler_patience
-        self.scheduler_factor = scheduler_factor
 
         # Bidirectional EA-LSTM parameters
         self.future_hidden_size = future_hidden_size if future_hidden_size is not None else hidden_size

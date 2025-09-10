@@ -9,9 +9,4 @@ from .config import TiDEConfig
 from .lightning import LitTiDE
 from .model import TiDEModel, TiDEResBlock
 
-__all__ = [
-    "TiDEConfig",
-    "TiDEModel",
-    "TiDEResBlock",
-    "LitTiDE"
-]
+__all__ = ["TiDEConfig", "TiDEModel", "TiDEResBlock", "LitTiDE"]

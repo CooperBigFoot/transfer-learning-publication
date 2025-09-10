@@ -103,7 +103,9 @@ class TestRevIN:
         x_norm = rev_in(x, mode="norm")
 
         # The output should be: (normalized * 2) + 3
-        x_norm_no_affine = (x - x.mean(dim=1, keepdim=True)) / torch.sqrt(x.var(dim=1, keepdim=True, unbiased=False) + rev_in.eps)
+        x_norm_no_affine = (x - x.mean(dim=1, keepdim=True)) / torch.sqrt(
+            x.var(dim=1, keepdim=True, unbiased=False) + rev_in.eps
+        )
         expected = x_norm_no_affine * 2.0 + 3.0
 
         assert torch.allclose(x_norm, expected, atol=1e-4)

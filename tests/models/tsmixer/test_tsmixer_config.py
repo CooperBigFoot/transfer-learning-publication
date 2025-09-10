@@ -123,8 +123,6 @@ class TestTSMixerConfig:
         expected_params = [
             "static_embedding_size",
             "num_mixing_layers",
-            "scheduler_patience",
-            "scheduler_factor",
             "fusion_method",
             "hidden_size",
             "dropout",

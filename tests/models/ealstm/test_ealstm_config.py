@@ -146,8 +146,6 @@ class TestEALSTMConfig:
         expected_params = [
             "num_layers",
             "bias",
-            "scheduler_patience",
-            "scheduler_factor",
             "dropout",
             "hidden_size",
             "future_hidden_size",

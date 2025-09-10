@@ -27,9 +27,7 @@ class TestLSHDataContainer:
             (datetime(2020, 1, 1), datetime(2020, 5, 29)),  # 150 days (Jan 1 to May 29)
         ]
         group_identifiers = ["station_1", "station_2"]
-        time_series = TimeSeriesCollection(
-            tensors, feature_names, date_ranges, group_identifiers
-        )
+        time_series = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
 
         # Create static attributes with same 2 groups
         static_tensors = [
@@ -37,9 +35,7 @@ class TestLSHDataContainer:
             torch.tensor([250.0, 47.6, -122.2]),
         ]
         attribute_names = ["elevation", "latitude", "longitude"]
-        static_attributes = StaticAttributeCollection(
-            static_tensors, attribute_names, group_identifiers
-        )
+        static_attributes = StaticAttributeCollection(static_tensors, attribute_names, group_identifiers)
 
         # Create sequence index for 2 groups
         sequences = torch.tensor(
@@ -92,9 +88,7 @@ class TestLSHDataContainer:
         # Create static attributes with different group count
         static_tensors = [torch.tensor([100.0, 45.5, -122.3])]  # Only 1 group
         attribute_names = ["elevation", "latitude", "longitude"]
-        mismatched_static = StaticAttributeCollection(
-            static_tensors, attribute_names, ["station_1"]
-        )
+        mismatched_static = StaticAttributeCollection(static_tensors, attribute_names, ["station_1"])
 
         with pytest.raises(
             ValueError,

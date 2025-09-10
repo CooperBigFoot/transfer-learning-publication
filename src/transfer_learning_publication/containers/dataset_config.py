@@ -41,12 +41,16 @@ class DatasetConfig:
             forcing_set = set(self.forcing_indices)
             if not future_set.issubset(forcing_set):
                 raise ValueError(
-                    f"Future indices {self.future_indices} must be subset of "
-                    f"forcing indices {self.forcing_indices}"
+                    f"Future indices {self.future_indices} must be subset of forcing indices {self.forcing_indices}"
                 )
 
         # CRITICAL: Prevent data leakage - target must NEVER be in future features
-        if self.is_autoregressive and self.target_idx is not None and self.future_indices and self.target_idx in self.future_indices:
+        if (
+            self.is_autoregressive
+            and self.target_idx is not None
+            and self.future_indices
+            and self.target_idx in self.future_indices
+        ):
             raise ValueError(
                 f"Data leakage detected: Target index {self.target_idx} cannot be in "
                 f"future_indices {self.future_indices}. Future target values are unknown "

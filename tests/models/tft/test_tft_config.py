@@ -206,8 +206,6 @@ class TestTFTConfig:
             "hidden_continuous_size",
             "attn_dropout",
             "add_relative_index",
-            "scheduler_patience",
-            "scheduler_factor",
             "quantiles",
             "context_length_ratio",
             "encoder_layers",

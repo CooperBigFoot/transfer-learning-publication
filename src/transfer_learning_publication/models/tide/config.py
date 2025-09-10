@@ -22,8 +22,6 @@ class TiDEConfig(BaseConfig):
         "past_feature_projection_size",
         "future_forcing_projection_size",
         "use_layer_norm",
-        "scheduler_patience",
-        "scheduler_factor",
         "hidden_size",
         "dropout",
     ]
@@ -82,6 +80,8 @@ class TiDEConfig(BaseConfig):
             future_input_size=future_input_size,
             learning_rate=learning_rate,
             group_identifier=group_identifier,
+            scheduler_patience=scheduler_patience,
+            scheduler_factor=scheduler_factor,
             **kwargs,
         )
 
@@ -94,8 +94,6 @@ class TiDEConfig(BaseConfig):
         self.past_feature_projection_size = past_feature_projection_size
         self.future_forcing_projection_size = future_forcing_projection_size
         self.use_layer_norm = use_layer_norm
-        self.scheduler_patience = scheduler_patience
-        self.scheduler_factor = scheduler_factor
 
         if self.num_encoder_layers < 1:
             raise ValueError("num_encoder_layers must be at least 1")

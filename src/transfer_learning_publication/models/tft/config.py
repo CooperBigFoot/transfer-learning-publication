@@ -22,8 +22,6 @@ class TFTConfig(BaseConfig):
         "hidden_continuous_size",
         "attn_dropout",
         "add_relative_index",
-        "scheduler_patience",
-        "scheduler_factor",
         "quantiles",
         "context_length_ratio",
         "encoder_layers",
@@ -88,6 +86,8 @@ class TFTConfig(BaseConfig):
             future_input_size=future_input_size,
             learning_rate=learning_rate,
             group_identifier=group_identifier,
+            scheduler_patience=scheduler_patience,
+            scheduler_factor=scheduler_factor,
             **kwargs,
         )
 
@@ -103,10 +103,6 @@ class TFTConfig(BaseConfig):
         self.quantiles = quantiles
         self.context_length_ratio = context_length_ratio
         self.encoder_layers = encoder_layers
-
-        # Scheduler parameters
-        self.scheduler_patience = scheduler_patience
-        self.scheduler_factor = scheduler_factor
 
         # Validate parameters
         if self.lstm_layers < 1:

@@ -139,8 +139,6 @@ class TestTiDEConfig:
             "past_feature_projection_size",
             "future_forcing_projection_size",
             "use_layer_norm",
-            "scheduler_patience",
-            "scheduler_factor",
             "hidden_size",
             "dropout",
         ]

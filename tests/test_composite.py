@@ -353,9 +353,7 @@ class TestCompositePipeline:
         # Use global ZScore on multiple columns
         steps = [
             CompositePipelineStep(
-                pipeline_type="global",
-                transforms=[ZScore()],
-                columns=["streamflow", "precipitation", "temperature"]
+                pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation", "temperature"]
             ),
         ]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")

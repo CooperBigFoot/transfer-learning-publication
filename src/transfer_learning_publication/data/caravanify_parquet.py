@@ -33,13 +33,17 @@ class CaravanDataSource:
         if region is None:
             # Access all regions
             region_pattern = "REGION_NAME=*"
-            self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+            self._ts_glob = str(
+                self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet"
+            )
             self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
             self._shapefile_patterns = [self.base_path / region_pattern / "data_type=shapefiles"]
         elif isinstance(region, str):
             # Single region
             region_pattern = f"REGION_NAME={region}"
-            self._ts_glob = str(self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet")
+            self._ts_glob = str(
+                self.base_path / region_pattern / "data_type=timeseries" / "gauge_id=*" / "data.parquet"
+            )
             self._attr_glob = str(self.base_path / region_pattern / "data_type=attributes" / "data.parquet")
             self._shapefile_patterns = [self.base_path / region_pattern / "data_type=shapefiles"]
         elif isinstance(region, list):
@@ -56,12 +60,10 @@ class CaravanDataSource:
                     for r in region
                 ]
                 self._attr_glob = [
-                    str(self.base_path / f"REGION_NAME={r}" / "data_type=attributes" / "data.parquet")
-                    for r in region
+                    str(self.base_path / f"REGION_NAME={r}" / "data_type=attributes" / "data.parquet") for r in region
                 ]
                 self._shapefile_patterns = [
-                    self.base_path / f"REGION_NAME={r}" / "data_type=shapefiles"
-                    for r in region
+                    self.base_path / f"REGION_NAME={r}" / "data_type=shapefiles" for r in region
                 ]
         else:
             raise TypeError(f"region must be str, list[str], or None, got {type(region)}")
@@ -182,12 +184,14 @@ class CaravanDataSource:
         """
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - return empty LazyFrame
-            return pl.DataFrame({
-                "REGION_NAME": pl.Series([], dtype=pl.Utf8),
-                "gauge_id": pl.Series([], dtype=pl.Utf8),
-                "min_date": pl.Series([], dtype=pl.Date),
-                "max_date": pl.Series([], dtype=pl.Date),
-            }).lazy()
+            return pl.DataFrame(
+                {
+                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                    "gauge_id": pl.Series([], dtype=pl.Utf8),
+                    "min_date": pl.Series([], dtype=pl.Date),
+                    "max_date": pl.Series([], dtype=pl.Date),
+                }
+            ).lazy()
 
         lf = pl.scan_parquet(self._ts_glob, hive_partitioning=True, rechunk=False, low_memory=True)
 
@@ -228,11 +232,13 @@ class CaravanDataSource:
 
         if isinstance(self._ts_glob, list) and not self._ts_glob:
             # Empty list - return empty LazyFrame
-            empty_df = pl.DataFrame({
-                "REGION_NAME": pl.Series([], dtype=pl.Utf8),
-                "gauge_id": pl.Series([], dtype=pl.Utf8),
-                "date": pl.Series([], dtype=pl.Date),
-            })
+            empty_df = pl.DataFrame(
+                {
+                    "REGION_NAME": pl.Series([], dtype=pl.Utf8),
+                    "gauge_id": pl.Series([], dtype=pl.Utf8),
+                    "date": pl.Series([], dtype=pl.Date),
+                }
+            )
             if columns:
                 for col in columns:
                     empty_df = empty_df.with_columns(pl.lit(None).alias(col))
@@ -274,7 +280,7 @@ class CaravanDataSource:
                     f"Requested timeseries columns not found in data: {sorted(missing_cols)}. "
                     f"Available columns: {sorted(available_cols - {'REGION_NAME', 'gauge_id', 'date', 'data_type'})}",
                     UserWarning,
-                    stacklevel=2
+                    stacklevel=2,
                 )
 
             cols_to_select = list(keep_cols & available_cols)
@@ -355,7 +361,7 @@ class CaravanDataSource:
                     f"Requested attribute columns not found in data: {sorted(missing_cols)}. "
                     f"Available columns: {sorted(available_cols - {'REGION_NAME', 'gauge_id', 'data_type'})}",
                     UserWarning,
-                    stacklevel=2
+                    stacklevel=2,
                 )
 
             cols_to_select = list(keep_cols & available_cols)
@@ -392,7 +398,9 @@ class CaravanDataSource:
                 raise FileNotFoundError("No regions specified")
 
             for region_name in self.region:
-                shapefile_path = self.base_path / f"REGION_NAME={region_name}" / "data_type=shapefiles" / f"{region_name}_shapes.shp"
+                shapefile_path = (
+                    self.base_path / f"REGION_NAME={region_name}" / "data_type=shapefiles" / f"{region_name}_shapes.shp"
+                )
                 if shapefile_path.exists():
                     gdf = gpd.read_file(shapefile_path)
                     gdf["REGION_NAME"] = region_name

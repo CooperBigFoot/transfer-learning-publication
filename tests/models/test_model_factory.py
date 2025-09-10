@@ -22,6 +22,7 @@ class TestRegisterModel:
 
     def test_register_model_basic(self):
         """Test basic model registration."""
+
         # Create a dummy config class
         class DummyConfig(BaseConfig):
             MODEL_PARAMS = ["dummy_param"]
@@ -50,6 +51,7 @@ class TestRegisterModel:
 
     def test_register_model_without_config_class(self):
         """Test registration without specifying config_class (should use BaseConfig)."""
+
         @register_model("test_model_no_config")
         class TestModelNoConfig(BaseLitModel):
             def __init__(self, config):
@@ -69,6 +71,7 @@ class TestRegisterModel:
 
     def test_duplicate_registration_raises_error(self):
         """Test that duplicate model names raise an error."""
+
         # First registration should succeed
         @register_model("duplicate_test")
         class TestModel1(BaseLitModel):
@@ -76,6 +79,7 @@ class TestRegisterModel:
 
         # Second registration with same name should fail
         with pytest.raises(ValueError, match="Model 'duplicate_test' is already registered"):
+
             @register_model("duplicate_test")
             class TestModel2(BaseLitModel):
                 pass
@@ -215,11 +219,11 @@ class TestCreateFromConfig:
                 "overrides": {
                     "hidden_size": 64,
                     "dropout": 0.1,
-                }
-            }
+                },
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -259,7 +263,7 @@ class TestCreateFromConfig:
             "learning_rate": 0.001,
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='_hyperparams.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix="_hyperparams.yaml", delete=False) as f:
             yaml.dump(hyperparams, f)
             hyperparam_path = Path(f.name)
 
@@ -276,10 +280,10 @@ class TestCreateFromConfig:
             "model": {
                 "type": "tide",
                 "config_file": str(hyperparam_path),  # Reference external file
-            }
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -309,7 +313,7 @@ class TestCreateFromConfig:
             "learning_rate": 0.001,
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='_hyperparams.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix="_hyperparams.yaml", delete=False) as f:
             yaml.dump(hyperparams, f)
             hyperparam_path = Path(f.name)
 
@@ -329,11 +333,11 @@ class TestCreateFromConfig:
                 "overrides": {
                     "dropout": 0.3,  # Override external value
                     "new_param": 42,  # Add new parameter
-                }
-            }
+                },
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -368,7 +372,7 @@ class TestCreateFromConfig:
             # Missing model section
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -394,10 +398,10 @@ class TestCreateFromConfig:
                 "overrides": {
                     "hidden_size": 64,
                 }
-            }
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -420,10 +424,10 @@ class TestCreateFromConfig:
             },
             "model": {
                 "type": "nonexistent_model",
-            }
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -447,10 +451,10 @@ class TestCreateFromConfig:
             "model": {
                 "type": "tide",
                 "config_file": "/nonexistent/file.yaml",
-            }
+            },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -479,7 +483,7 @@ class TestCreateFromConfig:
                 "dropout": 0.15,
             }
             hyperparam_path = models_dir / "tide_params.yaml"
-            with open(hyperparam_path, 'w') as f:
+            with open(hyperparam_path, "w") as f:
                 yaml.dump(hyperparams, f)
 
             # Create experiment config with relative path
@@ -495,11 +499,11 @@ class TestCreateFromConfig:
                 "model": {
                     "type": "tide",
                     "config_file": "models/tide_params.yaml",  # Relative path
-                }
+                },
             }
 
             config_path = configs_dir / "experiment.yaml"
-            with open(config_path, 'w') as f:
+            with open(config_path, "w") as f:
                 yaml.dump(yaml_content, f)
 
             # Create model
@@ -558,7 +562,7 @@ class TestModelFactory:
             },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -590,7 +594,7 @@ class TestModelFactory:
 
     def test_create_model_unknown_name(self):
         """Test creating model with unknown name raises error."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml") as f:
             yaml.dump({"test": "data"}, f)
             yaml_path = Path(f.name)
 
@@ -604,7 +608,7 @@ class TestModelFactory:
 
     def test_create_model_invalid_yaml(self):
         """Test creating model with invalid YAML raises error."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write("invalid: yaml: content: [")
             yaml_path = Path(f.name)
 
@@ -628,7 +632,7 @@ class TestModelFactory:
             },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -670,7 +674,7 @@ class TestModelFactory:
             },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = f.name  # String path
 
@@ -708,7 +712,7 @@ class TestIntegrationWithRealModels:
             },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 
@@ -748,7 +752,7 @@ class TestIntegrationWithRealModels:
             },
         }
 
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             yaml.dump(yaml_content, f)
             yaml_path = Path(f.name)
 

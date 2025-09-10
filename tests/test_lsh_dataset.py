@@ -266,7 +266,9 @@ class TestLSHDataset:
         # Verify it's a reasonable timestamp (milliseconds)
         assert sample.input_end_date == int(datetime(2023, 1, 15).timestamp() * 1000)
 
-    def test_getitem_date_computation_error(self, mock_time_series, mock_static_attributes, mock_sequence_index, caplog):
+    def test_getitem_date_computation_error(
+        self, mock_time_series, mock_static_attributes, mock_sequence_index, caplog
+    ):
         """Test __getitem__ handles date computation errors gracefully."""
         config = DatasetConfig(
             input_length=10,

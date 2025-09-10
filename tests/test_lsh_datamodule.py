@@ -96,7 +96,9 @@ class TestLSHDataModule:
         with open(config_path, "w") as f:
             yaml.dump(config, f)
 
-        with pytest.raises(ValueError, match="Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"):
+        with pytest.raises(
+            ValueError, match="Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"
+        ):
             LSHDataModule(config_path)
 
     def test_config_with_gauge_ids_list(self, tmp_path):
@@ -104,7 +106,7 @@ class TestLSHDataModule:
         config = {
             "data": {
                 "base_path": "/data",
-                "gauge_ids": ["basin1", "basin2", "basin3"]  # No region needed
+                "gauge_ids": ["basin1", "basin2", "basin3"],  # No region needed
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
@@ -134,7 +136,7 @@ class TestLSHDataModule:
         config = {
             "data": {
                 "base_path": "/data",
-                "gauge_ids_file": str(gauge_ids_file)  # No region needed
+                "gauge_ids_file": str(gauge_ids_file),  # No region needed
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
@@ -156,10 +158,7 @@ class TestLSHDataModule:
     def test_config_gauge_ids_file_not_found(self, tmp_path):
         """Test error when gauge_ids_file doesn't exist."""
         config = {
-            "data": {
-                "base_path": "/data",
-                "gauge_ids_file": "/nonexistent/file.txt"
-            },
+            "data": {"base_path": "/data", "gauge_ids_file": "/nonexistent/file.txt"},
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
             "data_preparation": {"is_autoregressive": True},
@@ -186,7 +185,7 @@ class TestLSHDataModule:
                 "base_path": "/data",
                 "gauge_ids_file": str(gauge_ids_file),  # This should take priority
                 "gauge_ids": ["list_basin1", "list_basin2"],  # This should be ignored
-                "region": "test"  # This should also be ignored
+                "region": "test",  # This should also be ignored
             },
             "features": {"forcing": ["f1"], "static": ["s1"], "target": "f1"},
             "sequence": {"input_length": 10, "output_length": 1},
@@ -331,7 +330,7 @@ class TestLSHDataModule:
         config = {
             "data": {
                 "base_path": str(tmp_path),
-                "gauge_ids": ["gauge1", "gauge2", "gauge3"]  # No region!
+                "gauge_ids": ["gauge1", "gauge2", "gauge3"],  # No region!
             },
             "features": {
                 "forcing": ["streamflow", "precipitation"],
@@ -388,12 +387,10 @@ class TestLSHDataModule:
 
         # Verify the explicit gauge IDs were used
         mock_caravan.get_timeseries.assert_called_with(
-            gauge_ids=["gauge1", "gauge2", "gauge3"],
-            columns=["streamflow", "precipitation"]
+            gauge_ids=["gauge1", "gauge2", "gauge3"], columns=["streamflow", "precipitation"]
         )
         mock_caravan.get_static_attributes.assert_called_with(
-            gauge_ids=["gauge1", "gauge2", "gauge3"],
-            columns=["area"]
+            gauge_ids=["gauge1", "gauge2", "gauge3"], columns=["area"]
         )
 
         # list_gauge_ids should NOT have been called since we provided explicit IDs

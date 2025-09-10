@@ -14,6 +14,8 @@ class BaseConfig:
         "learning_rate",
         "group_identifier",
         "use_rev_in",
+        "scheduler_factor",
+        "scheduler_patience",
     ]
 
     # Model-specific parameters to be defined in subclasses
@@ -29,6 +31,8 @@ class BaseConfig:
         learning_rate: float = 1e-5,
         group_identifier: str = "gauge_id",
         use_rev_in: bool = True,
+        scheduler_factor: float = 0.5,
+        scheduler_patience: int = 5,
         **kwargs,
     ):
         """Initialize base configuration with standard parameters."""
@@ -41,6 +45,8 @@ class BaseConfig:
         self.learning_rate = learning_rate
         self.group_identifier = group_identifier
         self.use_rev_in = use_rev_in  # Added RevIN configuration
+        self.scheduler_factor = scheduler_factor
+        self.scheduler_patience = scheduler_patience
 
         # Set model-specific parameters
         self._set_model_params(**kwargs)

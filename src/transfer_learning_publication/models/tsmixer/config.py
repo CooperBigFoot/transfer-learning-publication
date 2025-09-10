@@ -14,8 +14,6 @@ class TSMixerConfig(BaseConfig):
     MODEL_PARAMS: ClassVar[list[str]] = [
         "static_embedding_size",
         "num_mixing_layers",
-        "scheduler_patience",
-        "scheduler_factor",
         "fusion_method",
         "hidden_size",
         "dropout",
@@ -70,6 +68,8 @@ class TSMixerConfig(BaseConfig):
             learning_rate=learning_rate,
             group_identifier=group_identifier,
             use_rev_in=use_rev_in,
+            scheduler_patience=scheduler_patience,
+            scheduler_factor=scheduler_factor,
             **kwargs,
         )
 
@@ -78,8 +78,6 @@ class TSMixerConfig(BaseConfig):
         self.dropout = dropout
         self.static_embedding_size = static_embedding_size
         self.num_mixing_layers = num_mixing_layers
-        self.scheduler_patience = scheduler_patience
-        self.scheduler_factor = scheduler_factor
         self.fusion_method = fusion_method
 
         # Validate parameters

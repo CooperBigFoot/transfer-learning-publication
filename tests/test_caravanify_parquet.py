@@ -545,9 +545,7 @@ class TestErrorHandling:
 
         # Request mix of existing and non-existent columns
         with pytest.warns(UserWarning) as record:
-            ts_data = ds.get_timeseries(
-                columns=["streamflow", "nonexistent1", "temperature", "nonexistent2"]
-            ).collect()
+            ts_data = ds.get_timeseries(columns=["streamflow", "nonexistent1", "temperature", "nonexistent2"]).collect()
 
         # Check warning message contains missing columns
         assert len(record) == 1
@@ -569,9 +567,7 @@ class TestErrorHandling:
 
         # Request mix of existing and non-existent attributes
         with pytest.warns(UserWarning) as record:
-            attrs = ds.get_static_attributes(
-                columns=["area", "nonexistent_attr", "elevation", "missing_col"]
-            ).collect()
+            attrs = ds.get_static_attributes(columns=["area", "nonexistent_attr", "elevation", "missing_col"]).collect()
 
         # Check warning message contains missing columns
         assert len(record) == 1
@@ -619,17 +615,13 @@ class TestErrorHandling:
         assert "date" in ts_data.columns
         assert "REGION_NAME" in ts_data.columns
 
-
     def test_warning_with_empty_result(self, temp_hive_data):
         """Test warning when columns are missing even with empty result."""
         ds = CaravanDataSource(temp_hive_data)
 
         # Request non-existent columns with non-existent gauge (empty result)
         with pytest.warns(UserWarning, match="Requested timeseries columns not found in data"):
-            ts_data = ds.get_timeseries(
-                gauge_ids=["nonexistent_gauge"],
-                columns=["missing_column"]
-            ).collect()
+            ts_data = ds.get_timeseries(gauge_ids=["nonexistent_gauge"], columns=["missing_column"]).collect()
 
         assert len(ts_data) == 0  # Empty result
         assert "missing_column" not in ts_data.columns
@@ -650,7 +642,7 @@ class TestMultipleRegionsData:
         # Check we have gauges from both regions
         gauge_ids = set(ts_data["gauge_id"].unique())
         assert "G01013500" in gauge_ids  # From camels
-        assert "02LE024" in gauge_ids    # From hysets
+        assert "02LE024" in gauge_ids  # From hysets
 
     def test_get_timeseries_with_single_region_in_list(self, temp_hive_data):
         """Test getting timeseries with single region in list."""
@@ -758,11 +750,13 @@ class TestMultipleRegionsErrorHandling:
         """Test that writing timeseries with list of regions raises error."""
         ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
 
-        df = pl.DataFrame({
-            "gauge_id": ["G001"],
-            "date": ["2020-01-01"],
-            "streamflow": [10.5],
-        })
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
 
         with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
             ds.write_timeseries(df, tmp_path)
@@ -771,10 +765,12 @@ class TestMultipleRegionsErrorHandling:
         """Test that writing attributes with list of regions raises error."""
         ds = CaravanDataSource(tmp_path, region=["region1", "region2"])
 
-        df = pl.DataFrame({
-            "gauge_id": ["G001"],
-            "area": [100.5],
-        })
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "area": [100.5],
+            }
+        )
 
         with pytest.raises(ValueError, match="Cannot write attributes with multiple regions"):
             ds.write_static_attributes(df, tmp_path)
@@ -783,11 +779,13 @@ class TestMultipleRegionsErrorHandling:
         """Test that writing with empty region list raises error."""
         ds = CaravanDataSource(tmp_path, region=[])
 
-        df = pl.DataFrame({
-            "gauge_id": ["G001"],
-            "date": ["2020-01-01"],
-            "streamflow": [10.5],
-        })
+        df = pl.DataFrame(
+            {
+                "gauge_id": ["G001"],
+                "date": ["2020-01-01"],
+                "streamflow": [10.5],
+            }
+        )
 
         with pytest.raises(ValueError, match="Cannot write timeseries with multiple regions"):
             ds.write_timeseries(df, tmp_path)

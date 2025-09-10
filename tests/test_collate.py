@@ -44,19 +44,13 @@ class TestCollate:
     @pytest.fixture
     def consistent_samples(self, create_sample):
         """Create a list of consistent samples."""
-        samples = [
-            create_sample(group_id=f"gauge_{i:03d}", input_end_date=1234567890 + i)
-            for i in range(4)
-        ]
+        samples = [create_sample(group_id=f"gauge_{i:03d}", input_end_date=1234567890 + i) for i in range(4)]
         return samples
 
     @pytest.fixture
     def samples_without_future(self, create_sample):
         """Create samples without future tensors."""
-        samples = [
-            create_sample(group_id=f"gauge_{i:03d}", with_future=False)
-            for i in range(3)
-        ]
+        samples = [create_sample(group_id=f"gauge_{i:03d}", with_future=False) for i in range(3)]
         return samples
 
     @pytest.fixture
@@ -140,10 +134,7 @@ class TestCollate:
 
     def test_collate_samples_without_dates(self, create_sample):
         """Test collating samples without input_end_date."""
-        samples = [
-            create_sample(group_id=f"gauge_{i:03d}", input_end_date=None)
-            for i in range(3)
-        ]
+        samples = [create_sample(group_id=f"gauge_{i:03d}", input_end_date=None) for i in range(3)]
         batch = collate_samples(samples)
 
         assert batch.input_end_dates is None
@@ -202,10 +193,7 @@ class TestCollate:
 
     def test_collate_large_batch(self, create_sample):
         """Test collating a large batch of samples."""
-        samples = [
-            create_sample(group_id=f"gauge_{i:04d}")
-            for i in range(100)
-        ]
+        samples = [create_sample(group_id=f"gauge_{i:04d}") for i in range(100)]
         batch = collate_samples(samples)
 
         assert batch.batch_size == 100

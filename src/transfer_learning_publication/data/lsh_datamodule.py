@@ -17,6 +17,7 @@ from .lsh_dataset import LSHDataset
 
 logger = logging.getLogger(__name__)
 
+
 class LSHDataModule(pl.LightningDataModule):
     """
     PyTorch Lightning DataModule for time series forecasting.
@@ -86,9 +87,7 @@ class LSHDataModule(pl.LightningDataModule):
         has_gauge_ids_file = "gauge_ids_file" in config["data"]
 
         if not (has_region or has_gauge_ids or has_gauge_ids_file):
-            raise ValueError(
-                "Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file"
-            )
+            raise ValueError("Must specify at least one of: data.region, data.gauge_ids, or data.gauge_ids_file")
 
         # Validate gauge_ids_file exists if specified
         if has_gauge_ids_file:
@@ -119,7 +118,7 @@ class LSHDataModule(pl.LightningDataModule):
     def _load_gauge_ids(self) -> list[str] | None:
         """
         Load gauge IDs from config or file.
-        
+
         Returns:
             List of gauge IDs if explicitly specified, None to use region-based discovery
         """
