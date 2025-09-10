@@ -29,17 +29,6 @@ class ModelEvaluator:
     - Validating cache against configuration changes
     - Returning standardized EvaluationResults
 
-    Example:
-        >>> evaluator = ModelEvaluator(
-        ...     models_and_datamodules={
-        ...         "tide": (tide_model, datamodule),
-        ...         "ealstm": (ealstm_model, datamodule),
-        ...     },
-        ...     trainer_kwargs={"accelerator": "cpu"}
-        ... )
-        >>> results = evaluator.test_models(cache_dir="cache/exp001")
-        >>> df = results.by_model("tide")
-
     Attributes:
         models_and_datamodules: Registry of model/datamodule pairs
         trainer_kwargs: Arguments for PyTorch Lightning Trainer
