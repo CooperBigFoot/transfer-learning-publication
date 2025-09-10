@@ -147,6 +147,69 @@ class EvaluationResults:
             )
         return df
 
+    def filter(
+        self,
+        model_name: str | list[str] | None = None,
+        basin_id: str | list[str] | None = None,
+        lead_time: int | list[int] | None = None,
+    ) -> pl.DataFrame:
+        """Filter results by any combination of criteria.
+
+        Args:
+            model_name: Single model name or list of model names to filter
+            basin_id: Single basin ID or list of basin IDs to filter
+            lead_time: Single lead time or list of lead times to filter
+
+        Returns:
+            Filtered DataFrame with matching results
+
+        Examples:
+            # Single dimension (equivalent to by_model)
+            df = results.filter(model_name="tide")
+
+            # Multiple dimensions
+            df = results.filter(model_name="tide", lead_time=1)
+            df = results.filter(model_name=["tide", "ealstm"], basin_id="01234567")
+
+            # All three dimensions
+            df = results.filter(
+                model_name="tide",
+                basin_id=["01234567", "98765432"],
+                lead_time=[1, 2, 3]
+            )
+        """
+        df = self.raw_data
+
+        # Filter by model_name
+        if model_name is not None:
+            if isinstance(model_name, str):
+                df = df.filter(pl.col("model_name") == model_name)
+            else:
+                df = df.filter(pl.col("model_name").is_in(model_name))
+
+        # Filter by basin_id
+        if basin_id is not None:
+            if isinstance(basin_id, str):
+                df = df.filter(pl.col("group_identifier") == basin_id)
+            else:
+                df = df.filter(pl.col("group_identifier").is_in(basin_id))
+
+        # Filter by lead_time
+        if lead_time is not None:
+            if isinstance(lead_time, int):
+                # Validate single lead_time
+                if lead_time < 1 or lead_time > self.output_length:
+                    raise ValueError(f"lead_time must be between 1 and {self.output_length}, got {lead_time}")
+                df = df.filter(pl.col("lead_time") == lead_time)
+            else:
+                # Validate list of lead_times
+                for lt in lead_time:
+                    if lt < 1 or lt > self.output_length:
+                        raise ValueError(f"lead_time must be between 1 and {self.output_length}, got {lt}")
+                df = df.filter(pl.col("lead_time").is_in(lead_time))
+
+        return df
+
     def by_model(self, model_name: str) -> pl.DataFrame:
         """Filter results by model name.
 
@@ -163,7 +226,7 @@ class EvaluationResults:
             available = list(self.results_dict.keys())
             raise KeyError(f"Model '{model_name}' not found. Available models: {available}")
 
-        return self._forecast_output_to_dataframe(model_name, self.results_dict[model_name])
+        return self.filter(model_name=model_name)
 
     def by_basin(self, basin_id: str) -> pl.DataFrame:
         """Filter results by basin/gauge ID.
@@ -174,8 +237,7 @@ class EvaluationResults:
         Returns:
             DataFrame with results for specified basin across all models
         """
-        df = self.raw_data
-        return df.filter(pl.col("group_identifier") == basin_id)
+        return self.filter(basin_id=basin_id)
 
     def by_lead_time(self, lead_time: int) -> pl.DataFrame:
         """Filter results by lead time.
@@ -189,11 +251,7 @@ class EvaluationResults:
         Raises:
             ValueError: If lead_time is out of range
         """
-        if lead_time < 1 or lead_time > self.output_length:
-            raise ValueError(f"lead_time must be between 1 and {self.output_length}, got {lead_time}")
-
-        df = self.raw_data
-        return df.filter(pl.col("lead_time") == lead_time)
+        return self.filter(lead_time=lead_time)
 
     def to_parquet(self, output_dir: str | Path, partition_cols: list[str] | None = None) -> None:
         """Export results to parquet with partitioning.

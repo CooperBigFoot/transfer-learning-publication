@@ -543,3 +543,218 @@ class TestEvaluationResults:
 
         lead1_results = results.by_lead_time(1)
         assert len(lead1_results) == 6  # 6 total samples at lead time 1
+
+    def test_filter_single_dimension(self):
+        """Test filter method with single dimension."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0], [3.0, 4.0]]),
+            observations=torch.tensor([[1.1, 2.1], [3.1, 4.1]]),
+            group_identifiers=["basin1", "basin2"],
+        )
+
+        fo2 = ForecastOutput(
+            predictions=torch.tensor([[5.0, 6.0]]),
+            observations=torch.tensor([[5.1, 6.1]]),
+            group_identifiers=["basin3"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1, "model2": fo2},
+            output_length=2,
+        )
+
+        # Filter by model_name
+        df = results.filter(model_name="model1")
+        assert len(df) == 4  # 2 basins * 2 lead times
+        assert df["model_name"].unique().to_list() == ["model1"]
+
+        # Filter by basin_id
+        df = results.filter(basin_id="basin1")
+        assert len(df) == 2  # 1 basin * 2 lead times, only from model1
+        assert df["group_identifier"].unique().to_list() == ["basin1"]
+
+        # Filter by lead_time
+        df = results.filter(lead_time=1)
+        assert len(df) == 3  # 3 basins * 1 lead time
+        assert df["lead_time"].unique().to_list() == [1]
+
+    def test_filter_multiple_dimensions(self):
+        """Test filter method with multiple dimensions."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            observations=torch.tensor([[1.1, 2.1, 3.1], [4.1, 5.1, 6.1]]),
+            group_identifiers=["basin1", "basin2"],
+        )
+
+        fo2 = ForecastOutput(
+            predictions=torch.tensor([[7.0, 8.0, 9.0], [10.0, 11.0, 12.0]]),
+            observations=torch.tensor([[7.1, 8.1, 9.1], [10.1, 11.1, 12.1]]),
+            group_identifiers=["basin1", "basin3"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1, "model2": fo2},
+            output_length=3,
+        )
+
+        # Filter by model AND lead_time
+        df = results.filter(model_name="model1", lead_time=2)
+        assert len(df) == 2  # 2 basins for model1 at lead_time 2
+        assert df["model_name"].unique().to_list() == ["model1"]
+        assert df["lead_time"].unique().to_list() == [2]
+
+        # Filter by model AND basin
+        df = results.filter(model_name="model2", basin_id="basin1")
+        assert len(df) == 3  # 1 basin * 3 lead times
+        assert df["model_name"].unique().to_list() == ["model2"]
+        assert df["group_identifier"].unique().to_list() == ["basin1"]
+
+        # Filter by basin AND lead_time (across all models)
+        df = results.filter(basin_id="basin1", lead_time=1)
+        assert len(df) == 2  # 2 models have basin1
+        assert df["group_identifier"].unique().to_list() == ["basin1"]
+        assert df["lead_time"].unique().to_list() == [1]
+        assert set(df["model_name"].to_list()) == {"model1", "model2"}
+
+        # Filter all three dimensions
+        df = results.filter(model_name="model1", basin_id="basin2", lead_time=3)
+        assert len(df) == 1
+        assert df["model_name"][0] == "model1"
+        assert df["group_identifier"][0] == "basin2"
+        assert df["lead_time"][0] == 3
+
+    def test_filter_with_lists(self):
+        """Test filter method with list inputs."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+            observations=torch.tensor([[1.1, 2.1], [3.1, 4.1], [5.1, 6.1]]),
+            group_identifiers=["basin1", "basin2", "basin3"],
+        )
+
+        fo2 = ForecastOutput(
+            predictions=torch.tensor([[7.0, 8.0], [9.0, 10.0]]),
+            observations=torch.tensor([[7.1, 8.1], [9.1, 10.1]]),
+            group_identifiers=["basin1", "basin4"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1, "model2": fo2},
+            output_length=2,
+        )
+
+        # Filter with list of models
+        df = results.filter(model_name=["model1", "model2"])
+        assert len(df) == 10  # All data
+        assert set(df["model_name"].unique().to_list()) == {"model1", "model2"}
+
+        # Filter with list of basins
+        df = results.filter(basin_id=["basin1", "basin3"])
+        assert len(df) == 6  # (2 + 1) basins * 2 lead times
+        assert set(df["group_identifier"].unique().to_list()) == {"basin1", "basin3"}
+
+        # Filter with list of lead times
+        df = results.filter(lead_time=[1, 2])
+        assert len(df) == 10  # All data (since we have 2 lead times)
+        assert set(df["lead_time"].unique().to_list()) == {1, 2}
+
+        # Combined: multiple models and multiple basins
+        df = results.filter(model_name=["model1"], basin_id=["basin1", "basin2"])
+        assert len(df) == 4  # 2 basins * 2 lead times for model1
+        assert df["model_name"].unique().to_list() == ["model1"]
+        assert set(df["group_identifier"].unique().to_list()) == {"basin1", "basin2"}
+
+    def test_filter_empty_results(self):
+        """Test filter method that returns empty results."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0]]),
+            observations=torch.tensor([[1.1, 2.1]]),
+            group_identifiers=["basin1"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1},
+            output_length=2,
+        )
+
+        # Filter for non-existent basin
+        df = results.filter(basin_id="basin_not_exists")
+        assert len(df) == 0
+
+        # Filter for non-existent model (list)
+        df = results.filter(model_name=["model_not_exists"])
+        assert len(df) == 0
+
+    def test_filter_validation(self):
+        """Test filter method validation."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0, 3.0]]),
+            observations=torch.tensor([[1.1, 2.1, 3.1]]),
+            group_identifiers=["basin1"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1},
+            output_length=3,
+        )
+
+        # Test invalid lead_time (single value)
+        with pytest.raises(ValueError, match="lead_time must be between"):
+            results.filter(lead_time=0)
+
+        with pytest.raises(ValueError, match="lead_time must be between"):
+            results.filter(lead_time=4)
+
+        # Test invalid lead_time in list
+        with pytest.raises(ValueError, match="lead_time must be between"):
+            results.filter(lead_time=[1, 2, 5])
+
+    def test_filter_no_criteria(self):
+        """Test filter method with no criteria returns all data."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0]]),
+            observations=torch.tensor([[1.1, 2.1]]),
+            group_identifiers=["basin1"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1},
+            output_length=2,
+        )
+
+        # No filter criteria should return all data
+        df = results.filter()
+        assert df.equals(results.raw_data)
+
+    def test_by_methods_use_filter(self):
+        """Test that by_* methods properly use the filter method."""
+        fo1 = ForecastOutput(
+            predictions=torch.tensor([[1.0, 2.0]]),
+            observations=torch.tensor([[1.1, 2.1]]),
+            group_identifiers=["basin1"],
+        )
+
+        fo2 = ForecastOutput(
+            predictions=torch.tensor([[3.0, 4.0]]),
+            observations=torch.tensor([[3.1, 4.1]]),
+            group_identifiers=["basin2"],
+        )
+
+        results = EvaluationResults(
+            results_dict={"model1": fo1, "model2": fo2},
+            output_length=2,
+        )
+
+        # Test by_model uses filter
+        by_model_result = results.by_model("model1")
+        filter_result = results.filter(model_name="model1")
+        assert by_model_result.equals(filter_result)
+
+        # Test by_basin uses filter
+        by_basin_result = results.by_basin("basin1")
+        filter_result = results.filter(basin_id="basin1")
+        assert by_basin_result.equals(filter_result)
+
+        # Test by_lead_time uses filter
+        by_lead_result = results.by_lead_time(1)
+        filter_result = results.filter(lead_time=1)
+        assert by_lead_result.equals(filter_result)
