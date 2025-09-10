@@ -20,3 +20,5 @@ scratchpad/
 /data/
 
 logs/
+
+lightning_logs/

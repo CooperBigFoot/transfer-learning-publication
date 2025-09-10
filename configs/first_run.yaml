@@ -37,6 +37,7 @@ sequence:
 
 data_preparation:
   is_autoregressive: true
+  include_dates: true
 
 model:
   type: "tide"
