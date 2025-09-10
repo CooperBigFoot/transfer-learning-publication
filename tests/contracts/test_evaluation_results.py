@@ -89,8 +89,10 @@ class TestEvaluationResults:
             output_length=2,
         )
 
-        df = results.raw_data
+        lf = results.raw_data
+        assert isinstance(lf, pl.LazyFrame)
 
+        df = lf.collect()
         # Check structure
         assert isinstance(df, pl.DataFrame)
         assert len(df) == 4  # 2 basins * 2 lead times
@@ -125,8 +127,10 @@ class TestEvaluationResults:
             output_length=2,
         )
 
-        df = results.raw_data
+        lf = results.raw_data
+        assert isinstance(lf, pl.LazyFrame)
 
+        df = lf.collect()
         # Check date columns are included
         assert "issue_date" in df.columns
         assert "prediction_date" in df.columns
@@ -174,7 +178,9 @@ class TestEvaluationResults:
         )
 
         # Test valid model
-        df_model1 = results.by_model("model1")
+        lf_model1 = results.by_model("model1")
+        assert isinstance(lf_model1, pl.LazyFrame)
+        df_model1 = lf_model1.collect()
         assert len(df_model1) == 2
         assert df_model1["model_name"].unique().to_list() == ["model1"]
 
@@ -195,12 +201,16 @@ class TestEvaluationResults:
             output_length=2,
         )
 
-        df_basin1 = results.by_basin("basin1")
+        lf_basin1 = results.by_basin("basin1")
+        assert isinstance(lf_basin1, pl.LazyFrame)
+        df_basin1 = lf_basin1.collect()
         assert len(df_basin1) == 2  # 2 lead times
         assert df_basin1["group_identifier"].unique().to_list() == ["basin1"]
 
         # Test non-existent basin (should return empty)
-        df_basin3 = results.by_basin("basin3")
+        lf_basin3 = results.by_basin("basin3")
+        assert isinstance(lf_basin3, pl.LazyFrame)
+        df_basin3 = lf_basin3.collect()
         assert len(df_basin3) == 0
 
     def test_by_lead_time(self):
@@ -217,7 +227,9 @@ class TestEvaluationResults:
         )
 
         # Test valid lead time
-        df_lead1 = results.by_lead_time(1)
+        lf_lead1 = results.by_lead_time(1)
+        assert isinstance(lf_lead1, pl.LazyFrame)
+        df_lead1 = lf_lead1.collect()
         assert len(df_lead1) == 1
         assert df_lead1["lead_time"].unique().to_list() == [1]
 
@@ -532,8 +544,10 @@ class TestEvaluationResults:
             output_length=2,
         )
 
-        # Test combined DataFrame
-        df = results.raw_data
+        # Test combined LazyFrame
+        lf = results.raw_data
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 12  # (2+3+1) samples * 2 lead times
         assert df["model_name"].n_unique() == 3
 
@@ -541,7 +555,9 @@ class TestEvaluationResults:
         lstm_basin1 = df.filter((pl.col("model_name") == "lstm") & (pl.col("group_identifier") == "basin1"))
         assert len(lstm_basin1) == 2  # 2 lead times
 
-        lead1_results = results.by_lead_time(1)
+        lead1_lf = results.by_lead_time(1)
+        assert isinstance(lead1_lf, pl.LazyFrame)
+        lead1_results = lead1_lf.collect()
         assert len(lead1_results) == 6  # 6 total samples at lead time 1
 
     def test_filter_single_dimension(self):
@@ -564,17 +580,23 @@ class TestEvaluationResults:
         )
 
         # Filter by model_name
-        df = results.filter(model_name="model1")
+        lf = results.filter(model_name="model1")
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 4  # 2 basins * 2 lead times
         assert df["model_name"].unique().to_list() == ["model1"]
 
         # Filter by basin_id
-        df = results.filter(basin_id="basin1")
+        lf = results.filter(basin_id="basin1")
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 2  # 1 basin * 2 lead times, only from model1
         assert df["group_identifier"].unique().to_list() == ["basin1"]
 
         # Filter by lead_time
-        df = results.filter(lead_time=1)
+        lf = results.filter(lead_time=1)
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 3  # 3 basins * 1 lead time
         assert df["lead_time"].unique().to_list() == [1]
 
@@ -598,26 +620,34 @@ class TestEvaluationResults:
         )
 
         # Filter by model AND lead_time
-        df = results.filter(model_name="model1", lead_time=2)
+        lf = results.filter(model_name="model1", lead_time=2)
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 2  # 2 basins for model1 at lead_time 2
         assert df["model_name"].unique().to_list() == ["model1"]
         assert df["lead_time"].unique().to_list() == [2]
 
         # Filter by model AND basin
-        df = results.filter(model_name="model2", basin_id="basin1")
+        lf = results.filter(model_name="model2", basin_id="basin1")
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 3  # 1 basin * 3 lead times
         assert df["model_name"].unique().to_list() == ["model2"]
         assert df["group_identifier"].unique().to_list() == ["basin1"]
 
         # Filter by basin AND lead_time (across all models)
-        df = results.filter(basin_id="basin1", lead_time=1)
+        lf = results.filter(basin_id="basin1", lead_time=1)
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 2  # 2 models have basin1
         assert df["group_identifier"].unique().to_list() == ["basin1"]
         assert df["lead_time"].unique().to_list() == [1]
         assert set(df["model_name"].to_list()) == {"model1", "model2"}
 
         # Filter all three dimensions
-        df = results.filter(model_name="model1", basin_id="basin2", lead_time=3)
+        lf = results.filter(model_name="model1", basin_id="basin2", lead_time=3)
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 1
         assert df["model_name"][0] == "model1"
         assert df["group_identifier"][0] == "basin2"
@@ -643,22 +673,30 @@ class TestEvaluationResults:
         )
 
         # Filter with list of models
-        df = results.filter(model_name=["model1", "model2"])
+        lf = results.filter(model_name=["model1", "model2"])
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 10  # All data
         assert set(df["model_name"].unique().to_list()) == {"model1", "model2"}
 
         # Filter with list of basins
-        df = results.filter(basin_id=["basin1", "basin3"])
+        lf = results.filter(basin_id=["basin1", "basin3"])
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 6  # (2 + 1) basins * 2 lead times
         assert set(df["group_identifier"].unique().to_list()) == {"basin1", "basin3"}
 
         # Filter with list of lead times
-        df = results.filter(lead_time=[1, 2])
+        lf = results.filter(lead_time=[1, 2])
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 10  # All data (since we have 2 lead times)
         assert set(df["lead_time"].unique().to_list()) == {1, 2}
 
         # Combined: multiple models and multiple basins
-        df = results.filter(model_name=["model1"], basin_id=["basin1", "basin2"])
+        lf = results.filter(model_name=["model1"], basin_id=["basin1", "basin2"])
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 4  # 2 basins * 2 lead times for model1
         assert df["model_name"].unique().to_list() == ["model1"]
         assert set(df["group_identifier"].unique().to_list()) == {"basin1", "basin2"}
@@ -677,11 +715,15 @@ class TestEvaluationResults:
         )
 
         # Filter for non-existent basin
-        df = results.filter(basin_id="basin_not_exists")
+        lf = results.filter(basin_id="basin_not_exists")
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 0
 
         # Filter for non-existent model (list)
-        df = results.filter(model_name=["model_not_exists"])
+        lf = results.filter(model_name=["model_not_exists"])
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
         assert len(df) == 0
 
     def test_filter_validation(self):
@@ -722,8 +764,10 @@ class TestEvaluationResults:
         )
 
         # No filter criteria should return all data
-        df = results.filter()
-        assert df.equals(results.raw_data)
+        lf = results.filter()
+        assert isinstance(lf, pl.LazyFrame)
+        df = lf.collect()
+        assert df.equals(results.raw_data.collect())
 
     def test_by_methods_use_filter(self):
         """Test that by_* methods properly use the filter method."""
@@ -745,16 +789,22 @@ class TestEvaluationResults:
         )
 
         # Test by_model uses filter
-        by_model_result = results.by_model("model1")
-        filter_result = results.filter(model_name="model1")
-        assert by_model_result.equals(filter_result)
+        by_model_lf = results.by_model("model1")
+        filter_lf = results.filter(model_name="model1")
+        assert isinstance(by_model_lf, pl.LazyFrame)
+        assert isinstance(filter_lf, pl.LazyFrame)
+        assert by_model_lf.collect().equals(filter_lf.collect())
 
         # Test by_basin uses filter
-        by_basin_result = results.by_basin("basin1")
-        filter_result = results.filter(basin_id="basin1")
-        assert by_basin_result.equals(filter_result)
+        by_basin_lf = results.by_basin("basin1")
+        filter_lf = results.filter(basin_id="basin1")
+        assert isinstance(by_basin_lf, pl.LazyFrame)
+        assert isinstance(filter_lf, pl.LazyFrame)
+        assert by_basin_lf.collect().equals(filter_lf.collect())
 
         # Test by_lead_time uses filter
-        by_lead_result = results.by_lead_time(1)
-        filter_result = results.filter(lead_time=1)
-        assert by_lead_result.equals(filter_result)
+        by_lead_lf = results.by_lead_time(1)
+        filter_lf = results.filter(lead_time=1)
+        assert isinstance(by_lead_lf, pl.LazyFrame)
+        assert isinstance(filter_lf, pl.LazyFrame)
+        assert by_lead_lf.collect().equals(filter_lf.collect())

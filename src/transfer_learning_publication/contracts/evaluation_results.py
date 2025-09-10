@@ -61,32 +61,32 @@ class EvaluationResults:
         self.include_dates = first_output.input_end_dates is not None
 
     @property
-    def raw_data(self) -> pl.DataFrame:
-        """Get full DataFrame with all predictions.
+    def raw_data(self) -> pl.LazyFrame:
+        """Get full LazyFrame with all predictions.
 
         Returns:
-            Long-format DataFrame with all model results
+            Long-format LazyFrame with all model results
         """
         frames = []
 
         for model_name, forecast_output in self.results_dict.items():
-            df = self._forecast_output_to_dataframe(model_name, forecast_output)
+            df = self._forecast_output_to_lazyframe(model_name, forecast_output)
             frames.append(df)
 
         if not frames:
-            return pl.DataFrame()
+            return pl.DataFrame().lazy()
 
-        return pl.concat(frames)
+        return pl.concat(frames, how="vertical_relaxed")
 
-    def _forecast_output_to_dataframe(self, model_name: str, output: ForecastOutput) -> pl.DataFrame:
-        """Convert a single ForecastOutput to long-format DataFrame.
+    def _forecast_output_to_lazyframe(self, model_name: str, output: ForecastOutput) -> pl.LazyFrame:
+        """Convert a single ForecastOutput to long-format LazyFrame.
 
         Args:
             model_name: Name of the model
             output: ForecastOutput object
 
         Returns:
-            Long-format DataFrame
+            Long-format LazyFrame
         """
         n_samples = output.predictions.shape[0]
         output_len = output.predictions.shape[1]
@@ -135,8 +135,8 @@ class EvaluationResults:
                     data_dict["issue_date"].append(issue_date_us)
                     data_dict["prediction_date"].append(prediction_date_us)
 
-        # Create DataFrame with proper datetime columns
-        df = pl.DataFrame(data_dict)
+        # Create LazyFrame with proper datetime columns
+        df = pl.DataFrame(data_dict).lazy()
         if self.include_dates:
             # Convert microsecond columns to datetime
             df = df.with_columns(
@@ -152,7 +152,7 @@ class EvaluationResults:
         model_name: str | list[str] | None = None,
         basin_id: str | list[str] | None = None,
         lead_time: int | list[int] | None = None,
-    ) -> pl.DataFrame:
+    ) -> pl.LazyFrame:
         """Filter results by any combination of criteria.
 
         Args:
@@ -161,7 +161,7 @@ class EvaluationResults:
             lead_time: Single lead time or list of lead times to filter
 
         Returns:
-            Filtered DataFrame with matching results
+            Filtered LazyFrame with matching results
 
         Examples:
             # Single dimension (equivalent to by_model)
@@ -210,14 +210,14 @@ class EvaluationResults:
 
         return df
 
-    def by_model(self, model_name: str) -> pl.DataFrame:
+    def by_model(self, model_name: str) -> pl.LazyFrame:
         """Filter results by model name.
 
         Args:
             model_name: Name of the model to filter for
 
         Returns:
-            DataFrame with results for specified model
+            LazyFrame with results for specified model
 
         Raises:
             KeyError: If model_name not found
@@ -228,25 +228,25 @@ class EvaluationResults:
 
         return self.filter(model_name=model_name)
 
-    def by_basin(self, basin_id: str) -> pl.DataFrame:
+    def by_basin(self, basin_id: str) -> pl.LazyFrame:
         """Filter results by basin/gauge ID.
 
         Args:
             basin_id: Basin/gauge identifier to filter for
 
         Returns:
-            DataFrame with results for specified basin across all models
+            LazyFrame with results for specified basin across all models
         """
         return self.filter(basin_id=basin_id)
 
-    def by_lead_time(self, lead_time: int) -> pl.DataFrame:
+    def by_lead_time(self, lead_time: int) -> pl.LazyFrame:
         """Filter results by lead time.
 
         Args:
             lead_time: Lead time to filter for (1 to output_length)
 
         Returns:
-            DataFrame with results for specified lead time across all models
+            LazyFrame with results for specified lead time across all models
 
         Raises:
             ValueError: If lead_time is out of range
@@ -266,7 +266,7 @@ class EvaluationResults:
         if partition_cols is None:
             partition_cols = ["model_name"]
 
-        df = self.raw_data
+        df = self.raw_data.collect()
 
         # For partitioned writes, we need to manually partition with polars
         if partition_cols:
