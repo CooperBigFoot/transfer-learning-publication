@@ -433,3 +433,25 @@ class LSHDataModule(pl.LightningDataModule):
     def is_autoregressive(self) -> bool:
         """Whether the model is autoregressive."""
         return self.config["data_preparation"]["is_autoregressive"]
+
+    def get_config_dict(self) -> dict[str, any]:
+        """
+        Get configuration dictionary for cache validation.
+
+        Returns relevant configuration parameters that affect model testing
+        and should trigger cache invalidation if changed.
+
+        Returns:
+            Dictionary with key configuration parameters
+        """
+        return {
+            "input_length": self.config["sequence"]["input_length"],
+            "output_length": self.config["sequence"]["output_length"],
+            "forcing_features": self.config["features"]["forcing"],
+            "static_features": self.config["features"]["static"],
+            "future_features": self.config["features"].get("future", []),
+            "target_name": self.config["features"]["target"],
+            "is_autoregressive": self.config["data_preparation"]["is_autoregressive"],
+            "group_identifier_name": "gauge_id",
+            "include_dates": self.config["data_preparation"].get("include_dates", False),
+        }

@@ -690,3 +690,73 @@ class TestLSHDataModule:
         predictions = torch.tensor([0.5, 1.5])
         with pytest.raises(ValueError, match="No pipeline path configured"):
             dm.inverse_transform(predictions)
+
+    def test_get_config_dict(self, tmp_path):
+        """Test get_config_dict returns correct configuration."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation", "temperature"],
+                "static": ["area", "elevation"],
+                "future": ["temperature", "precipitation"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 365, "output_length": 7},
+            "data_preparation": {"is_autoregressive": True, "include_dates": True},
+            "dataloader": {"batch_size": 16},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        config_dict = dm.get_config_dict()
+
+        # Check all expected keys are present
+        assert "input_length" in config_dict
+        assert "output_length" in config_dict
+        assert "forcing_features" in config_dict
+        assert "static_features" in config_dict
+        assert "future_features" in config_dict
+        assert "target_name" in config_dict
+        assert "is_autoregressive" in config_dict
+        assert "group_identifier_name" in config_dict
+        assert "include_dates" in config_dict
+
+        # Check values match config
+        assert config_dict["input_length"] == 365
+        assert config_dict["output_length"] == 7
+        assert config_dict["forcing_features"] == ["streamflow", "precipitation", "temperature"]
+        assert config_dict["static_features"] == ["area", "elevation"]
+        assert config_dict["future_features"] == ["temperature", "precipitation"]
+        assert config_dict["target_name"] == "streamflow"
+        assert config_dict["is_autoregressive"] is True
+        assert config_dict["group_identifier_name"] == "gauge_id"
+        assert config_dict["include_dates"] is True
+
+    def test_get_config_dict_minimal(self, tmp_path):
+        """Test get_config_dict with minimal configuration."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "data_preparation": {"is_autoregressive": False},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        config_dict = dm.get_config_dict()
+
+        # Check defaults for optional fields
+        assert config_dict["future_features"] == []
+        assert config_dict["include_dates"] is False
+        assert config_dict["is_autoregressive"] is False

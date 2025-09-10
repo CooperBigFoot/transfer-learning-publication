@@ -120,7 +120,7 @@ class TestBaseLitModel:
 
         # Check that test_outputs is cleared
         assert naive_model.test_outputs == []
-        
+
         # Check that forecast_output is stored internally
         assert naive_model._forecast_output is not None
         assert naive_model._forecast_output is forecast_output
@@ -178,34 +178,34 @@ class TestBaseLitModel:
         # Should raise error before testing
         with pytest.raises(RuntimeError, match="No forecast output available"):
             _ = naive_model.forecast_output
-            
+
         # Run test epoch
         naive_model.on_test_epoch_start()
         for i in range(2):
             naive_model.test_step(sample_batch, batch_idx=i)
         result = naive_model.on_test_epoch_end()
-        
+
         # Now property should work
         stored_output = naive_model.forecast_output
         assert stored_output is result
         assert isinstance(stored_output, ForecastOutput)
         assert stored_output.predictions.shape == (8, 5)  # 2 batches * 4 samples
-        
+
     def test_forecast_output_reset_on_new_test(self, naive_model, sample_batch):
         """Test that forecast_output is reset on new test epoch."""
         # Run first test
         naive_model.on_test_epoch_start()
         naive_model.test_step(sample_batch, batch_idx=0)
         first_output = naive_model.on_test_epoch_end()
-        
+
         # Start new test - should reset
         naive_model.on_test_epoch_start()
         assert naive_model._forecast_output is None
-        
+
         # Run second test
         naive_model.test_step(sample_batch, batch_idx=0)
         second_output = naive_model.on_test_epoch_end()
-        
+
         # Should have new output
         assert naive_model.forecast_output is second_output
         assert naive_model.forecast_output is not first_output
