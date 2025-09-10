@@ -41,7 +41,7 @@ class CompositePipeline:
         self.group_identifier = group_identifier
         self._fitted_steps: list[PerBasinPipeline | GlobalPipeline] = []
         self._is_fitted = False
-        self._group_mapping = {}  # Maps numeric indices back to original group values
+        self._group_mapping = {}
 
     def __repr__(self) -> str:
         return f"CompositePipeline(steps={self.steps}, group_identifier='{self.group_identifier}')"
