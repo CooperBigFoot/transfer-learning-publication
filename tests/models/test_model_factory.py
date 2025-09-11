@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 import torch
@@ -513,6 +514,257 @@ class TestCreateFromConfig:
             assert model.config.hidden_size == 256
             assert model.config.dropout == 0.15
 
+    def test_create_from_config_delegates_to_create_from_dict(self):
+        """Test that create_from_config delegates to create_from_dict."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 2,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+            "model": {
+                "type": "tide",
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+
+        try:
+            with patch.object(ModelFactory, "create_from_dict") as mock_create_from_dict:
+                mock_model = MagicMock(spec=BaseLitModel)
+                mock_create_from_dict.return_value = mock_model
+
+                # Call create_from_config
+                model = ModelFactory.create_from_config(yaml_path)
+
+                # Check that create_from_dict was called
+                mock_create_from_dict.assert_called_once()
+                call_args = mock_create_from_dict.call_args
+                assert call_args[0][0] == "tide"  # First positional arg is model name
+                assert isinstance(call_args[0][1], dict)  # Second is config dict
+
+                # Check model was returned
+                assert model == mock_model
+
+        finally:
+            yaml_path.unlink()
+
+
+class TestCreateFromDict:
+    """Test suite for the create_from_dict method."""
+
+    def test_create_from_dict_basic(self):
+        """Test creating a model from a configuration dictionary."""
+        config_dict = {
+            "input_len": 30,
+            "output_len": 7,
+            "input_size": 3,
+            "static_size": 1,
+            "hidden_size": 64,
+            "dropout": 0.1,
+        }
+
+        # Create model
+        model = ModelFactory.create_from_dict("tide", config_dict)
+
+        # Check model is created
+        assert model is not None
+        assert hasattr(model, "model")
+        assert hasattr(model, "config")
+
+        # Check config values
+        assert model.config.input_len == 30
+        assert model.config.output_len == 7
+        assert model.config.input_size == 3
+        assert model.config.static_size == 1
+        assert model.config.hidden_size == 64
+        assert model.config.dropout == 0.1
+
+        # Test forward pass
+        x = torch.randn(2, 30, 3)
+        static = torch.randn(2, 1)
+        output = model(x, static)
+        assert output.shape == (2, 7, 1)
+
+    def test_create_from_dict_filters_params(self):
+        """Test that create_from_dict filters out unaccepted parameters."""
+        config_dict = {
+            "input_len": 20,
+            "output_len": 5,
+            "input_size": 2,
+            "hidden_size": 32,
+            "invalid_param": "should_be_filtered",
+            "another_invalid": 123,
+        }
+
+        # Create model - should not raise error despite invalid params
+        model = ModelFactory.create_from_dict("tide", config_dict)
+
+        # Check valid params are set
+        assert model.config.input_len == 20
+        assert model.config.output_len == 5
+        assert model.config.input_size == 2
+        assert model.config.hidden_size == 32
+
+        # Invalid params should not be in config
+        assert not hasattr(model.config, "invalid_param")
+        assert not hasattr(model.config, "another_invalid")
+
+    def test_create_from_dict_invalid_model(self):
+        """Test error when model name is not in registry."""
+        config_dict = {"input_len": 10, "output_len": 1}
+
+        with pytest.raises(ValueError, match="Model 'unknown_model' not found"):
+            ModelFactory.create_from_dict("unknown_model", config_dict)
+
+    def test_create_from_dict_multiple_models(self):
+        """Test creating different models with same config."""
+        config_dict = {
+            "input_len": 15,
+            "output_len": 3,
+            "input_size": 2,
+            "static_size": 0,
+        }
+
+        # Create different models
+        tide_model = ModelFactory.create_from_dict("tide", config_dict)
+        ealstm_model = ModelFactory.create_from_dict("ealstm", config_dict)
+
+        # Check both are created
+        assert tide_model is not None
+        assert ealstm_model is not None
+
+        # Check they are different types
+        assert type(tide_model).__name__ == "LitTiDE"
+        assert type(ealstm_model).__name__ == "LitEALSTM"
+
+        # Check both have same config values
+        for model in [tide_model, ealstm_model]:
+            assert model.config.input_len == 15
+            assert model.config.output_len == 3
+            assert model.config.input_size == 2
+
+
+class TestCreateFromCheckpoint:
+    """Test suite for the create_from_checkpoint method."""
+
+    def test_create_from_checkpoint_basic(self):
+        """Test loading a model from checkpoint."""
+        # Create a temporary checkpoint file
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as f:
+            checkpoint_path = Path(f.name)
+
+        try:
+            # Mock the model class directly in the registry
+            from transfer_learning_publication.models.tide.lightning import LitTiDE
+            
+            with patch.object(LitTiDE, "load_from_checkpoint") as mock_load:
+                mock_model_instance = MagicMock(spec=BaseLitModel)
+                mock_load.return_value = mock_model_instance
+
+                # Load model from checkpoint
+                model = ModelFactory.create_from_checkpoint("tide", checkpoint_path)
+
+                # Check that load_from_checkpoint was called with correct path
+                mock_load.assert_called_once_with(checkpoint_path)
+
+                # Check model was returned
+                assert model == mock_model_instance
+
+        finally:
+            checkpoint_path.unlink()
+
+    def test_create_from_checkpoint_missing_file(self):
+        """Test error when checkpoint file doesn't exist."""
+        with pytest.raises(FileNotFoundError, match="Checkpoint file not found"):
+            ModelFactory.create_from_checkpoint("tide", Path("/nonexistent/checkpoint.ckpt"))
+
+    def test_create_from_checkpoint_invalid_model(self):
+        """Test error when model name is not in registry."""
+        # Create a temporary checkpoint file
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as f:
+            checkpoint_path = Path(f.name)
+
+        try:
+            with pytest.raises(ValueError, match="Model 'unknown_model' not found"):
+                ModelFactory.create_from_checkpoint("unknown_model", checkpoint_path)
+        finally:
+            checkpoint_path.unlink()
+
+    def test_create_from_checkpoint_incompatible(self):
+        """Test error when checkpoint is incompatible with model class."""
+        # Create a temporary checkpoint file
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as f:
+            checkpoint_path = Path(f.name)
+            # Write some dummy data to make it a non-empty file
+            torch.save({"state_dict": {"dummy": torch.tensor([1.0])}}, f.name)
+
+        try:
+            # This should fail because the checkpoint doesn't have the right structure
+            with pytest.raises(RuntimeError, match="Failed to load checkpoint"):
+                ModelFactory.create_from_checkpoint("tide", checkpoint_path)
+        finally:
+            checkpoint_path.unlink()
+
+    def test_create_from_checkpoint_string_path(self):
+        """Test that string paths work as well as Path objects."""
+        # Create a temporary checkpoint file
+        with tempfile.NamedTemporaryFile(suffix=".ckpt", delete=False) as f:
+            checkpoint_path = f.name  # String path
+
+        try:
+            # Mock the model class directly in the registry
+            from transfer_learning_publication.models.tide.lightning import LitTiDE
+            
+            with patch.object(LitTiDE, "load_from_checkpoint") as mock_load:
+                mock_model_instance = MagicMock(spec=BaseLitModel)
+                mock_load.return_value = mock_model_instance
+
+                # Load model from checkpoint using string path
+                model = ModelFactory.create_from_checkpoint("tide", checkpoint_path)
+
+                # Check model was returned
+                assert model == mock_model_instance
+
+        finally:
+            Path(checkpoint_path).unlink()
+
+
+class TestGetModelClass:
+    """Test suite for the get_model_class method."""
+
+    def test_get_model_class_valid(self):
+        """Test getting model class for valid model names."""
+        from transfer_learning_publication.models.tide.lightning import LitTiDE
+        from transfer_learning_publication.models.ealstm.lightning import LitEALSTM
+
+        # Test getting TiDE model class
+        tide_class = ModelFactory.get_model_class("tide")
+        assert tide_class == LitTiDE
+
+        # Test getting EALSTM model class
+        ealstm_class = ModelFactory.get_model_class("ealstm")
+        assert ealstm_class == LitEALSTM
+
+    def test_get_model_class_invalid(self):
+        """Test error when model name is not in registry."""
+        with pytest.raises(ValueError, match="Model 'unknown_model' not found"):
+            ModelFactory.get_model_class("unknown_model")
+
+    def test_get_model_class_all_registered(self):
+        """Test that all registered models can have their class retrieved."""
+        available_models = ModelFactory.list_available()
+
+        for model_name in available_models:
+            model_class = ModelFactory.get_model_class(model_name)
+            assert model_class is not None
+            assert issubclass(model_class, BaseLitModel)
+
 
 class TestModelFactory:
     """Test suite for ModelFactory class methods."""
@@ -590,6 +842,43 @@ class TestModelFactory:
 
         finally:
             # Clean up
+            yaml_path.unlink()
+
+    def test_create_delegates_to_create_from_dict(self):
+        """Test that create method delegates to create_from_dict."""
+        yaml_content = {
+            "sequence": {
+                "input_length": 10,
+                "output_length": 2,
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "target": "streamflow",
+            },
+        }
+
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            yaml.dump(yaml_content, f)
+            yaml_path = Path(f.name)
+
+        try:
+            with patch.object(ModelFactory, "create_from_dict") as mock_create_from_dict:
+                mock_model = MagicMock(spec=BaseLitModel)
+                mock_create_from_dict.return_value = mock_model
+
+                # Call create
+                model = ModelFactory.create("tide", yaml_path)
+
+                # Check that create_from_dict was called
+                mock_create_from_dict.assert_called_once()
+                call_args = mock_create_from_dict.call_args
+                assert call_args[0][0] == "tide"  # First positional arg is model name
+                assert isinstance(call_args[0][1], dict)  # Second is config dict
+
+                # Check model was returned
+                assert model == mock_model
+
+        finally:
             yaml_path.unlink()
 
     def test_create_model_unknown_name(self):

@@ -112,6 +112,86 @@ class ModelFactory:
     """
 
     @staticmethod
+    def create_from_dict(name: str, config_dict: dict[str, Any]) -> BaseLitModel:
+        """Create a model instance from a configuration dictionary.
+
+        This is the core creation method that other methods delegate to.
+
+        Args:
+            name: Registered model name (e.g., "tide", "ealstm")
+            config_dict: Dictionary of configuration parameters
+
+        Returns:
+            Instantiated Lightning module ready for training
+
+        Raises:
+            ValueError: If model name not found in registry
+
+        Example:
+            config = {"input_len": 365, "output_len": 10, ...}
+            model = ModelFactory.create_from_dict("tide", config)
+        """
+        # Ensure models are registered
+        _ensure_models_registered()
+
+        # Validate model exists
+        if name not in _MODELS:
+            available = list(_MODELS.keys())
+            raise ValueError(f"Model '{name}' not found in registry. Available models: {sorted(available)}")
+
+        # Get model and config classes
+        model_class, config_class = _MODELS[name]
+
+        # Filter config_dict to only include parameters the config class accepts
+        accepted_params = set(config_class.STANDARD_PARAMS + config_class.MODEL_PARAMS)
+        filtered_config = {key: value for key, value in config_dict.items() if key in accepted_params}
+
+        # Create model instance
+        # The model's __init__ will handle conversion from dict to config object
+        model = model_class(filtered_config)
+
+        return model
+
+    @staticmethod
+    def create(name: str, yaml_path: Path | str) -> BaseLitModel:
+        """Create a model instance from a YAML configuration file.
+
+        This method loads a YAML configuration, extracts and standardizes the
+        parameters, and creates an instance of the requested model.
+
+        Args:
+            name: Registered model name (e.g., "tide", "ealstm")
+            yaml_path: Path to YAML configuration file
+
+        Returns:
+            Instantiated Lightning module ready for training
+
+        Raises:
+            ValueError: If model name not found in registry
+            FileNotFoundError: If YAML file doesn't exist
+            yaml.YAMLError: If YAML file is invalid
+
+        Example:
+            model = ModelFactory.create("tide", Path("configs/experiment.yaml"))
+        """
+        # Convert to Path if string
+        yaml_path = Path(yaml_path)
+
+        # Check file exists
+        if not yaml_path.exists():
+            raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
+
+        # Load YAML configuration
+        with open(yaml_path) as f:
+            yaml_dict = yaml.safe_load(f)
+
+        # Extract and standardize configuration
+        config_dict = _extract_config(yaml_dict)
+
+        # Delegate to create_from_dict
+        return ModelFactory.create_from_dict(name, config_dict)
+
+    @staticmethod
     def create_from_config(config_path: Path | str) -> BaseLitModel:
         """Create a model instance from an experiment configuration file.
 
@@ -199,81 +279,62 @@ class ModelFactory:
             if key not in config_dict:  # Only add if not already set by model config/overrides
                 config_dict[key] = value
 
-        # Create model using existing create method logic
-        _ensure_models_registered()
-
-        # Validate model exists
-        if model_type not in _MODELS:
-            available = list(_MODELS.keys())
-            raise ValueError(f"Model '{model_type}' not found in registry. Available models: {sorted(available)}")
-
-        # Get model and config classes
-        model_class, config_class = _MODELS[model_type]
-
-        # Filter config_dict to only include parameters the config class accepts
-        accepted_params = set(config_class.STANDARD_PARAMS + config_class.MODEL_PARAMS)
-        filtered_config = {key: value for key, value in config_dict.items() if key in accepted_params}
-
-        # Create model instance
-        model = model_class(filtered_config)
-
-        return model
+        # Create model using create_from_dict
+        return ModelFactory.create_from_dict(model_type, config_dict)
 
     @staticmethod
-    def create(name: str, yaml_path: Path | str) -> BaseLitModel:
-        """Create a model instance from a YAML configuration file.
+    def create_from_checkpoint(model_name: str, checkpoint_path: Path | str) -> BaseLitModel:
+        """Load a model from a PyTorch Lightning checkpoint.
 
-        This method loads a YAML configuration, extracts and standardizes the
-        parameters, and creates an instance of the requested model.
+        Uses the model registry to find the correct model class and leverages
+        Lightning's built-in checkpoint loading functionality.
 
         Args:
-            name: Registered model name (e.g., "tide", "ealstm")
-            yaml_path: Path to YAML configuration file
+            model_name: Registered model name (e.g., "tide", "ealstm")
+            checkpoint_path: Path to the checkpoint file
 
         Returns:
-            Instantiated Lightning module ready for training
+            Model loaded with weights and configuration from checkpoint
 
         Raises:
             ValueError: If model name not found in registry
-            FileNotFoundError: If YAML file doesn't exist
-            yaml.YAMLError: If YAML file is invalid
+            FileNotFoundError: If checkpoint file doesn't exist
+            RuntimeError: If checkpoint is incompatible with model class
 
         Example:
-            model = ModelFactory.create("tide", Path("configs/experiment.yaml"))
+            model = ModelFactory.create_from_checkpoint(
+                "tide",
+                "checkpoints/tide_best.ckpt"
+            )
         """
         # Ensure models are registered
         _ensure_models_registered()
 
         # Validate model exists
-        if name not in _MODELS:
+        if model_name not in _MODELS:
             available = list(_MODELS.keys())
-            raise ValueError(f"Model '{name}' not found in registry. Available models: {sorted(available)}")
+            raise ValueError(f"Model '{model_name}' not found in registry. Available models: {sorted(available)}")
 
         # Convert to Path if string
-        yaml_path = Path(yaml_path)
+        checkpoint_path = Path(checkpoint_path)
 
-        # Check file exists
-        if not yaml_path.exists():
-            raise FileNotFoundError(f"Configuration file not found: {yaml_path}")
+        # Check checkpoint exists
+        if not checkpoint_path.exists():
+            raise FileNotFoundError(f"Checkpoint file not found: {checkpoint_path}")
 
-        # Load YAML configuration
-        with open(yaml_path) as f:
-            yaml_dict = yaml.safe_load(f)
+        # Get model class from registry
+        model_class, _ = _MODELS[model_name]
 
-        # Extract and standardize configuration
-        config_dict = _extract_config(yaml_dict)
-
-        # Get model and config classes
-        model_class, config_class = _MODELS[name]
-
-        # Filter config_dict to only include parameters the config class accepts
-        # This prevents errors when models don't accept certain parameters
-        accepted_params = set(config_class.STANDARD_PARAMS + config_class.MODEL_PARAMS)
-        filtered_config = {key: value for key, value in config_dict.items() if key in accepted_params}
-
-        # Create model instance
-        # The model's __init__ will handle conversion from dict to config object
-        model = model_class(filtered_config)
+        # Use Lightning's built-in checkpoint loading
+        # This handles everything: hyperparameters, weights, optimizer state, etc.
+        try:
+            model = model_class.load_from_checkpoint(checkpoint_path)
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load checkpoint for model '{model_name}'. "
+                f"The checkpoint may be incompatible with the model class. "
+                f"Error: {e}"
+            )
 
         return model
 
@@ -314,6 +375,29 @@ class ModelFactory:
 
         _, config_class = _MODELS[name]
         return config_class
+
+    @staticmethod
+    def get_model_class(name: str) -> type[BaseLitModel]:
+        """Get the Lightning module class for a specific model.
+
+        Args:
+            name: Registered model name
+
+        Returns:
+            Lightning module class for the model
+
+        Raises:
+            ValueError: If model name not found in registry
+        """
+        # Ensure models are registered
+        _ensure_models_registered()
+
+        if name not in _MODELS:
+            available = list(_MODELS.keys())
+            raise ValueError(f"Model '{name}' not found in registry. Available models: {sorted(available)}")
+
+        model_class, _ = _MODELS[name]
+        return model_class
 
 
 def _ensure_models_registered():
