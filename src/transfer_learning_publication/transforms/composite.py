@@ -42,8 +42,8 @@ class CompositePipeline:
         self._fitted_steps: list[PerBasinPipeline | GlobalPipeline] = []
         self._is_fitted = False
         self._group_mapping = {}
-        self._fitted_columns: list[str] = []  # All columns present during fit
-        self._transformed_columns: set[str] = set()  # Columns that were actually transformed
+        self._fitted_columns: list[str] = []
+        self._transformed_columns: set[str] = set()
 
     def __repr__(self) -> str:
         return f"CompositePipeline(steps={self.steps}, group_identifier='{self.group_identifier}')"
@@ -282,10 +282,10 @@ class CompositePipeline:
 
     def get_fitted_columns(self) -> list[str]:
         """Returns all columns the pipeline was fitted on.
-        
+
         Returns:
             List of column names present during fit
-            
+
         Raises:
             RuntimeError: If pipeline is not fitted
         """
@@ -295,10 +295,10 @@ class CompositePipeline:
 
     def get_transformed_columns(self) -> set[str]:
         """Returns only columns that were actually transformed.
-        
+
         Returns:
             Set of column names that were transformed by any step
-            
+
         Raises:
             RuntimeError: If pipeline is not fitted
         """
@@ -308,7 +308,7 @@ class CompositePipeline:
 
     def describe(self) -> dict[str, Any]:
         """Returns a description of the pipeline structure for introspection.
-        
+
         Returns:
             Dictionary with pipeline metadata and structure
         """
@@ -321,33 +321,29 @@ class CompositePipeline:
                 {
                     "type": step.pipeline_type,
                     "columns": step.columns,
-                    "transforms": [t.__class__.__name__ for t in step.transforms]
+                    "transforms": [t.__class__.__name__ for t in step.transforms],
                 }
                 for step in self.steps
-            ]
+            ],
         }
 
-    def inverse_transform_partial(
-        self,
-        df: pl.DataFrame,
-        column_mapping: dict[str, str] | None = None
-    ) -> pl.DataFrame:
+    def inverse_transform_partial(self, df: pl.DataFrame, column_mapping: dict[str, str] | None = None) -> pl.DataFrame:
         """
         Inverse transform a DataFrame that may have missing columns.
-        
+
         This is perfect for evaluation results where we have 'prediction'/'observation'
         instead of 'streamflow', and other columns are missing.
-        
+
         Missing columns are zero-filled since we drop them afterwards anyway.
-        
+
         Args:
             df: DataFrame with potentially missing columns
-            column_mapping: Map df columns to expected columns 
+            column_mapping: Map df columns to expected columns
                            e.g., {"prediction": "streamflow"}
-        
+
         Returns:
             DataFrame with only the originally present columns (mapped back)
-        
+
         Raises:
             RuntimeError: If pipeline is not fitted
             ValueError: If mapped columns don't exist in fitted columns

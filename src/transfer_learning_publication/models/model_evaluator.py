@@ -181,13 +181,13 @@ class ModelEvaluator:
         try:
             trainer.test(model=model, datamodule=datamodule)
         except Exception as e:
-            raise RuntimeError(f"Testing failed for model '{model_name}': {e}")
+            raise RuntimeError(f"Testing failed for model '{model_name}': {e}") from e
 
         # Get forecast output
         try:
             forecast_output = model.forecast_output
         except RuntimeError as e:
-            raise RuntimeError(f"Could not retrieve forecast output for '{model_name}': {e}")
+            raise RuntimeError(f"Could not retrieve forecast output for '{model_name}': {e}") from e
 
         return forecast_output
 
@@ -489,12 +489,10 @@ class ModelEvaluator:
 
                 except Exception as e:
                     logger.warning(f"Failed to apply inverse transform for '{model_name}': {e}")
-                    # Keep original if transform fails
                     transformed_results[model_name] = forecast_output
             else:
-                # No pipeline available, keep original
                 transformed_results[model_name] = forecast_output
-                logger.debug(f"No pipeline available for '{model_name}', keeping original values")
+                logger.warning(f"No pipeline available for '{model_name}', keeping original values")
 
         return transformed_results
 

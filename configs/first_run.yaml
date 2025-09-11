@@ -1,6 +1,7 @@
 data:
   base_path: "/Users/cooper/Desktop/first-test"
   gauge_ids: ["tajikkyrgyz_15013", "tajikkyrgyz_15016", "tajikkyrgyz_15020"]
+  pipeline_path: "/Users/cooper/Desktop/first-test/ts_pipeline.joblib"
 
 features:
   forcing:
