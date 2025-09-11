@@ -22,6 +22,17 @@ A thin wrapper extending `BaseLitModel` that connects the core model to the trai
 
 ## Data Interface
 
+### Data Preprocessing
+
+Data may be preprocessed by a `CompositePipeline` before reaching the model. Common transformations include:
+- Log transformation for positive-only variables (e.g., streamflow)
+- Z-score normalization for standardization
+- Per-basin or global transformations
+
+The ModelEvaluator automatically handles inverse transforms during evaluation, so models always work with transformed data during training and inference, while evaluation metrics are computed on the original scale.
+
+### Batch Contract
+
 Models interact with data through the `Batch` contract:
 
 ```python
@@ -125,6 +136,8 @@ The `BaseLitModel` handles:
 - Optional RevIN normalization/denormalization
 - Test output collection into `ForecastOutput` contract
 - Logging of standard metrics
+
+**Note on Inverse Transforms**: The `BaseLitModel` works with transformed data. The `ModelEvaluator` handles applying inverse transforms to the `ForecastOutput` when a pipeline is available, ensuring evaluation metrics are computed on the original scale. Models themselves don't need to handle inverse transformation.
 
 ## Feature Terminology
 

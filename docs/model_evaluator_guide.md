@@ -72,6 +72,12 @@ results = evaluator.test_models(
     cache_dir="cache/experiment_001",
     force_recompute=True
 )
+
+# Disable inverse transform to keep results in transformed space
+results_transformed = evaluator.test_models(
+    cache_dir="cache/experiment_001",
+    apply_inverse_transform=False  # Default is True
+)
 ```
 
 ### Accessing Results
@@ -100,6 +106,74 @@ summary = results.summary()
 models = results.list_models()
 basins = results.list_basins()
 ```
+
+## Inverse Transform Support
+
+### Automatic Pipeline Integration
+
+The ModelEvaluator now automatically applies inverse transforms when a preprocessing pipeline is available. This ensures evaluation results are in the original scale, making them interpretable and suitable for domain-specific metrics.
+
+```python
+# If your datamodule has a fitted pipeline, inverse transform is automatic
+evaluator = ModelEvaluator(
+    models_and_datamodules={
+        "lstm": (lstm_model, datamodule),  # datamodule.get_pipeline() returns fitted pipeline
+    }
+)
+
+# Results are automatically in original scale
+results = evaluator.test_models()  # apply_inverse_transform=True by default
+
+# Check if streamflow values are in original scale (e.g., m³/s)
+print(results.raw_data["prediction"].describe())
+# Original scale: might show min=0.5, max=1000.0 (realistic flow values)
+# Transformed scale: might show min=-2.3, max=3.1 (normalized values)
+```
+
+### How It Works
+
+1. **Pipeline Detection**: ModelEvaluator checks if the datamodule has a pipeline via `get_pipeline()`
+2. **Target Identification**: Gets the target variable name from `get_target_name()` (e.g., "streamflow")
+3. **Separate Processing**: Predictions and observations are inverse transformed independently
+4. **Column Mapping**: Maps "prediction" → target name → "prediction" for seamless integration
+5. **Smart Handling**: Only transforms if pipeline is fitted and available
+
+### Controlling Inverse Transform
+
+```python
+# Keep results in transformed space for custom processing
+results_transformed = evaluator.test_models(
+    apply_inverse_transform=False
+)
+
+# Apply your own transformations
+custom_results = my_custom_inverse_transform(results_transformed.raw_data)
+
+# Or selectively inverse transform later
+if need_original_scale:
+    pipeline = datamodule.get_pipeline()
+    if pipeline:
+        # Use the pipeline's partial inverse transform
+        predictions_original = pipeline.inverse_transform_partial(
+            results_transformed.raw_data[["group_identifier", "prediction"]],
+            column_mapping={"prediction": "streamflow"}
+        )
+```
+
+### Requirements for Inverse Transform
+
+For automatic inverse transform to work:
+
+1. **DataModule Methods**: Must implement:
+   - `get_pipeline()`: Returns CompositePipeline or None
+   - `get_target_name()`: Returns target column name
+   - `get_group_identifier_name()`: Returns group ID column name
+
+2. **Pipeline State**: Pipeline must be fitted (`pipeline._is_fitted == True`)
+
+3. **Compatible Structure**: Group identifiers must match between pipeline and evaluation data
+
+See the [CompositePipeline Guide](composite_pipeline_guide.md) for detailed pipeline documentation.
 
 ## Advanced Features
 
@@ -218,12 +292,14 @@ The `EvaluationResults.raw_data` DataFrame has the following structure:
 | model_name | str | Name of the model |
 | group_identifier | str | Basin or gauge ID |
 | lead_time | int | Forecast horizon (1 to output_length) |
-| prediction | float | Model prediction value |
-| observation | float | Ground truth value |
+| prediction | float | Model prediction value† |
+| observation | float | Ground truth value† |
 | issue_date* | datetime | When forecast was issued |
 | prediction_date* | datetime | Date being predicted |
 
 *Date columns are only included if the model provides timestamp information.
+
+†Values are in original scale if `apply_inverse_transform=True` (default) and a pipeline is available, otherwise in transformed scale.
 
 ## Integration with Training Pipeline
 
@@ -271,7 +347,11 @@ print(summary)
 
 ### DataModule Requirements
 
-The `LSHDataModule` must implement `get_config_dict()` method that returns:
+The `LSHDataModule` must implement several methods for full functionality:
+
+#### Configuration Method
+
+`get_config_dict()` returns configuration for cache validation:
 
 ```python
 {
@@ -287,7 +367,23 @@ The `LSHDataModule` must implement `get_config_dict()` method that returns:
 }
 ```
 
-This configuration is used for cache validation.
+#### Pipeline Access Methods (for inverse transform)
+
+```python
+def get_pipeline(self) -> CompositePipeline | None:
+    """Return preprocessing pipeline if available."""
+    if self._pipeline is None and self._pipeline_path:
+        self._pipeline = joblib.load(self._pipeline_path)
+    return self._pipeline
+
+def get_target_name(self) -> str:
+    """Return target column name."""
+    return self.config["features"]["target"]
+
+def get_group_identifier_name(self) -> str:
+    """Return group identifier column name."""
+    return "gauge_id"  # Or from config
+```
 
 ### Model Requirements
 
@@ -375,14 +471,23 @@ evaluator = ModelEvaluator(
     }
 )
 
-# Run evaluation with caching
+# Run evaluation with caching and automatic inverse transform
 cache_dir = Path("cache") / "experiment_001"
-results = evaluator.test_models(cache_dir=cache_dir)
+results = evaluator.test_models(
+    cache_dir=cache_dir,
+    apply_inverse_transform=True  # Default - results in original scale
+)
 
 # Get summary statistics
 summary = results.summary()
 print("\nModel Summary:")
 print(summary)
+
+# Check if results are in original scale
+if results.raw_data["prediction"].min() > 0:
+    print("Results are in original scale (e.g., m³/s for streamflow)")
+else:
+    print("Results appear to be in transformed scale (normalized)")
 
 # Export to parquet for further analysis
 results.to_parquet("results/experiment_001/")
@@ -437,6 +542,7 @@ class ModelEvaluator:
         cache_dir: str | Path | None = None,
         only: list[str] | None = None,
         force_recompute: bool = False,
+        apply_inverse_transform: bool = True,
     ) -> EvaluationResults
     
     def validate_cache(self, cache_dir: str | Path, model_name: str) -> bool

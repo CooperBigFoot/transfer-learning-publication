@@ -20,6 +20,9 @@ model = ModelFactory.create("tide", Path("configs/experiment.yaml"))
 
 # The model is ready for training with PyTorch Lightning
 trainer.fit(model, datamodule)
+
+# Note: If datamodule has a preprocessing pipeline, ModelEvaluator will
+# automatically apply inverse transforms during evaluation
 ```
 
 ### Discovering Available Models
@@ -282,6 +285,8 @@ Run the factory tests to ensure everything is working:
 ```bash
 uv run pytest tests/models/test_model_factory.py -v
 ```
+
+**Note on Transformed Data**: Models work with preprocessed data during training. If your data uses a `CompositePipeline` for transformations (Log, ZScore, etc.), the models train on transformed values. The `ModelEvaluator` automatically handles inverse transforms during evaluation to compute metrics on the original scale. See the [CompositePipeline Guide](composite_pipeline_guide.md) for details.
 
 ## Design Rationale
 
