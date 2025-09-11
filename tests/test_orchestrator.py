@@ -164,8 +164,10 @@ class TestRunExperiment:
 
     def test_filters_models_when_specified(self, experiment_config_file):
         """Test that only specified models are trained."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.return_value = True
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             results = run_experiment(
                 experiment_config_file,
@@ -185,8 +187,10 @@ class TestRunExperiment:
 
     def test_trains_all_models_when_none_specified(self, experiment_config_file):
         """Test that all models are trained when none are specified."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.return_value = True
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             results = run_experiment(
                 experiment_config_file,
@@ -201,8 +205,10 @@ class TestRunExperiment:
 
     def test_multiple_seeds_training(self, experiment_config_file):
         """Test training with multiple seeds."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.return_value = True
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             run_experiment(experiment_config_file, models=["tide"], n_runs=3, start_seed=42)
 
@@ -249,9 +255,11 @@ class TestRunExperiment:
 
     def test_handles_training_failures(self, experiment_config_file):
         """Test that training failures are handled gracefully."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             # First run succeeds, second fails
             mock_train.side_effect = [True, False]
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             results = run_experiment(experiment_config_file, models=["tide"], n_runs=2, start_seed=42)
 
@@ -260,8 +268,10 @@ class TestRunExperiment:
 
     def test_handles_training_exceptions(self, experiment_config_file):
         """Test that training exceptions are handled gracefully."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.side_effect = Exception("Training error")
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             results = run_experiment(experiment_config_file, models=["tide"], n_runs=1, start_seed=42)
 
@@ -270,8 +280,10 @@ class TestRunExperiment:
 
     def test_calculates_total_time(self, experiment_config_file):
         """Test that total time is calculated and formatted correctly."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.return_value = True
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             with patch("time.time") as mock_time:
                 # Simulate 1 hour, 23 minutes, 45 seconds
@@ -292,8 +304,10 @@ class TestRunExperiment:
 
     def test_seed_consistency_in_checkpoint_paths(self, experiment_config_file):
         """Test that checkpoint paths correctly include seed values."""
-        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train, \
+             patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
             mock_train.return_value = True
+            mock_complete.return_value = False  # Ensure training is not skipped
 
             # Run with multiple seeds
             run_experiment(experiment_config_file, models=["tide"], n_runs=3, start_seed=100)
