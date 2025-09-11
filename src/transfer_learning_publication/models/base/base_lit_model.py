@@ -18,20 +18,46 @@ class BaseLitModel(pl.LightningModule):
     All models should extend this class and implement the forward method.
     """
 
-    def __init__(self, config: BaseConfig) -> None:
+    def __init__(self, config: BaseConfig | None = None, **kwargs) -> None:
         """Initialize base model with configuration.
 
         Args:
-            config: Model configuration containing hyperparameters
+            config: Model configuration containing hyperparameters.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
         super().__init__()
 
-        self.config = config
-        self.save_hyperparameters(config.to_dict())
+        # Handle checkpoint loading case where config is None and kwargs are provided
+        if config is None:
+            if not kwargs:
+                raise ValueError("Either config or hyperparameters must be provided")
+            # This will be handled by subclasses to create the appropriate config type
+            # For now, we'll store kwargs and let subclasses handle config creation
+            self._init_from_kwargs = True
+            self.config = None  # Will be set by subclass
+            # Don't save hyperparameters here - let subclass do it after creating config
+        else:
+            self._init_from_kwargs = False
+            self.config = config
+            self.save_hyperparameters(config.to_dict())
 
+        # Only initialize these if we have a config (subclass will call _complete_init)
+        if self.config is not None:
+            self._complete_init()
+
+    def _complete_init(self) -> None:
+        """Complete initialization after config is set.
+        
+        This is called either directly in __init__ (when config is provided)
+        or by subclasses after they create the config from kwargs.
+        """
+        if self.config is None:
+            raise RuntimeError("Config must be set before calling _complete_init")
+            
         self.criterion = MSELoss()
 
-        if getattr(config, "use_rev_in", True):
+        if getattr(self.config, "use_rev_in", True):
             self.rev_in = RevIN(num_features=1, eps=1e-5, affine=True)
         else:
             self.rev_in = None

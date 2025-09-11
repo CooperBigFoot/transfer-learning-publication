@@ -21,23 +21,35 @@ class LitTFT(BaseLitModel):
 
     def __init__(
         self,
-        config: TFTConfig | dict[str, Any],
+        config: TFTConfig | dict[str, Any] | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize the LitTFT module.
 
         Args:
-            config: TFT configuration as a TFTConfig instance or dict
+            config: TFT configuration as a TFTConfig instance or dict.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
-        # Convert dict config to TFTConfig if needed
-        if isinstance(config, dict):
-            config = TFTConfig.from_dict(config)
-
-        # Initialize base lightning model with the config
-        super().__init__(config)
+        # Handle different initialization patterns
+        if config is None and kwargs:
+            # Loading from checkpoint - reconstruct config from kwargs
+            tft_config = TFTConfig(**kwargs)
+            super().__init__(tft_config)
+        elif isinstance(config, dict):
+            # Dict config provided
+            tft_config = TFTConfig.from_dict(config)
+            super().__init__(tft_config)
+        elif config is not None:
+            # TFTConfig instance provided
+            tft_config = config
+            super().__init__(tft_config)
+        else:
+            raise ValueError("Either config or hyperparameters must be provided")
 
         # Create the TFT model
-        self.model = TemporalFusionTransformer(config)
+        self.model = TemporalFusionTransformer(self.config)
 
     def forward(
         self,

@@ -20,25 +20,38 @@ class LitEALSTM(BaseLitModel):
 
     def __init__(
         self,
-        config: EALSTMConfig | dict[str, Any],
+        config: EALSTMConfig | dict[str, Any] | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize the LitEALSTM module.
 
         Args:
-            config: EA-LSTM configuration as an EALSTMConfig instance or dict
+            config: EA-LSTM configuration as an EALSTMConfig instance or dict.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
-        # Convert dict config to EALSTMConfig if needed
-        ealstm_config = EALSTMConfig.from_dict(config) if isinstance(config, dict) else config
-
-        # Initialize base lightning model with the config
-        super().__init__(ealstm_config)
+        # Handle different initialization patterns
+        if config is None and kwargs:
+            # Loading from checkpoint - reconstruct config from kwargs
+            ealstm_config = EALSTMConfig(**kwargs)
+            super().__init__(ealstm_config)
+        elif isinstance(config, dict):
+            # Dict config provided
+            ealstm_config = EALSTMConfig.from_dict(config)
+            super().__init__(ealstm_config)
+        elif config is not None:
+            # EALSTMConfig instance provided
+            ealstm_config = config
+            super().__init__(ealstm_config)
+        else:
+            raise ValueError("Either config or hyperparameters must be provided")
 
         # Create the appropriate model based on configuration
-        if ealstm_config.bidirectional:
-            self.model = BiEALSTM(ealstm_config)
+        if self.config.bidirectional:
+            self.model = BiEALSTM(self.config)
         else:
-            self.model = EALSTM(ealstm_config)
+            self.model = EALSTM(self.config)
 
     def forward(
         self,

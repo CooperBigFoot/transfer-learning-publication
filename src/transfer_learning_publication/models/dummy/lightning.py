@@ -22,22 +22,34 @@ class LitNaiveLastValue(BaseLitModel):
 
     def __init__(
         self,
-        config: NaiveLastValueConfig | dict[str, Any],
+        config: NaiveLastValueConfig | dict[str, Any] | None = None,
+        **kwargs,
     ):
         """Initialize the Lightning Module with a NaiveLastValueConfig.
 
         Args:
-            config: Either a NaiveLastValueConfig object or a dictionary of config parameters
+            config: Either a NaiveLastValueConfig object or a dictionary of config parameters.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
-        # Convert dict config to NaiveLastValueConfig if needed
-        if isinstance(config, dict):
-            config = NaiveLastValueConfig.from_dict(config)
-
-        # Initialize base class with the config
-        super().__init__(config)
+        # Handle different initialization patterns
+        if config is None and kwargs:
+            # Loading from checkpoint - reconstruct config from kwargs
+            naive_config = NaiveLastValueConfig(**kwargs)
+            super().__init__(naive_config)
+        elif isinstance(config, dict):
+            # Dict config provided
+            naive_config = NaiveLastValueConfig.from_dict(config)
+            super().__init__(naive_config)
+        elif config is not None:
+            # NaiveLastValueConfig instance provided
+            naive_config = config
+            super().__init__(naive_config)
+        else:
+            raise ValueError("Either config or hyperparameters must be provided")
 
         # Create the NaiveLastValue model using the config
-        self.model = NaiveLastValue(config)
+        self.model = NaiveLastValue(self.config)
 
     def forward(self, x: torch.Tensor, static: torch.Tensor = None, future: torch.Tensor = None) -> torch.Tensor:
         """Forward pass that delegates to the NaiveLastValue model.

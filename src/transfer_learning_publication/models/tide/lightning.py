@@ -20,22 +20,36 @@ class LitTiDE(BaseLitModel):
 
     def __init__(
         self,
-        config: TiDEConfig | dict[str, Any],
+        config: TiDEConfig | dict[str, Any] | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize the LitTiDE module.
 
         Args:
-            config: TiDE configuration as a TiDEConfig instance or dict
+            config: TiDE configuration as a TiDEConfig instance or dict.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
-        # Convert dict config to TiDEConfig if needed
-        tide_config = TiDEConfig.from_dict(config) if isinstance(config, dict) else config
-
-        # Initialize base lightning model with the config
-        super().__init__(tide_config)
+        # Handle different initialization patterns
+        if config is None and kwargs:
+            # Loading from checkpoint - reconstruct config from kwargs
+            tide_config = TiDEConfig(**kwargs)
+            # Initialize base with the reconstructed config
+            super().__init__(tide_config)
+        elif isinstance(config, dict):
+            # Dict config provided
+            tide_config = TiDEConfig.from_dict(config)
+            super().__init__(tide_config)
+        elif config is not None:
+            # TiDEConfig instance provided
+            tide_config = config
+            super().__init__(tide_config)
+        else:
+            raise ValueError("Either config or hyperparameters must be provided")
 
         # Create the TiDE model
-        self.model = TiDEModel(tide_config)
+        self.model = TiDEModel(self.config)
 
     def forward(
         self,

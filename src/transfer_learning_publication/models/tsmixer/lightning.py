@@ -21,22 +21,35 @@ class LitTSMixer(BaseLitModel):
 
     def __init__(
         self,
-        config: TSMixerConfig | dict[str, Any],
+        config: TSMixerConfig | dict[str, Any] | None = None,
+        **kwargs,
     ) -> None:
         """
         Initialize the LitTSMixer module.
 
         Args:
-            config: TSMixer configuration as a TSMixerConfig instance or dict
+            config: TSMixer configuration as a TSMixerConfig instance or dict.
+                    If None, config will be reconstructed from kwargs (for checkpoint loading).
+            **kwargs: Individual hyperparameters (used when loading from checkpoint).
         """
-        # Convert dict config to TSMixerConfig if needed
-        tsmixer_config = TSMixerConfig.from_dict(config) if isinstance(config, dict) else config
-
-        # Initialize base lightning model with the config
-        super().__init__(tsmixer_config)
+        # Handle different initialization patterns
+        if config is None and kwargs:
+            # Loading from checkpoint - reconstruct config from kwargs
+            tsmixer_config = TSMixerConfig(**kwargs)
+            super().__init__(tsmixer_config)
+        elif isinstance(config, dict):
+            # Dict config provided
+            tsmixer_config = TSMixerConfig.from_dict(config)
+            super().__init__(tsmixer_config)
+        elif config is not None:
+            # TSMixerConfig instance provided
+            tsmixer_config = config
+            super().__init__(tsmixer_config)
+        else:
+            raise ValueError("Either config or hyperparameters must be provided")
 
         # Create the underlying TSMixer model
-        self.model = TSMixer(tsmixer_config)
+        self.model = TSMixer(self.config)
 
     def forward(
         self,
