@@ -61,7 +61,7 @@ class LSHDataModule(pl.LightningDataModule):
         self._pipeline = None
         self._pipeline_path = self.config["data"].get("pipeline_path")
 
-        logger.info(f"LSHDataModule initialized with config: {config_path}")
+        logger.debug(f"LSHDataModule initialized with config: {config_path}")
 
     def _load_config(self, config_path: str | Path) -> dict[str, any]:
         """Load and validate configuration from YAML file."""
@@ -127,7 +127,7 @@ class LSHDataModule(pl.LightningDataModule):
         # Priority 1: gauge_ids_file
         if "gauge_ids_file" in config_data:
             gauge_ids_path = Path(config_data["gauge_ids_file"])
-            logger.info(f"Loading gauge IDs from file: {gauge_ids_path}")
+            logger.debug(f"Loading gauge IDs from file: {gauge_ids_path}")
 
             with open(gauge_ids_path) as f:
                 gauge_ids = [line.strip() for line in f if line.strip()]
@@ -135,7 +135,7 @@ class LSHDataModule(pl.LightningDataModule):
             if not gauge_ids:
                 raise ValueError(f"No gauge IDs found in file: {gauge_ids_path}")
 
-            logger.info(f"Loaded {len(gauge_ids)} gauge IDs from file")
+            logger.debug(f"Loaded {len(gauge_ids)} gauge IDs from file")
             return gauge_ids
 
         # Priority 2: gauge_ids list in config
@@ -146,11 +146,11 @@ class LSHDataModule(pl.LightningDataModule):
             if not gauge_ids:
                 raise ValueError("config data.gauge_ids cannot be empty")
 
-            logger.info(f"Using {len(gauge_ids)} gauge IDs from config")
+            logger.debug(f"Using {len(gauge_ids)} gauge IDs from config")
             return gauge_ids
 
         # Priority 3: Use region-based discovery (return None)
-        logger.info("No explicit gauge IDs provided, will use region-based discovery")
+        logger.debug("No explicit gauge IDs provided, will use region-based discovery")
         return None
 
     def setup(self, stage: str | None = None) -> None:
@@ -164,22 +164,22 @@ class LSHDataModule(pl.LightningDataModule):
         """
         if stage == "fit" or stage is None:
             if self.train_dataset is None:
-                logger.info("Building training dataset...")
+                logger.debug("Building training dataset...")
                 self._train_container = self._build_container("train")
                 self.train_dataset = LSHDataset(self._train_container)
-                logger.info(f"Training dataset ready: {len(self.train_dataset)} sequences")
+                logger.debug(f"Training dataset ready: {len(self.train_dataset)} sequences")
 
             if self.val_dataset is None:
-                logger.info("Building validation dataset...")
+                logger.debug("Building validation dataset...")
                 self._val_container = self._build_container("val")
                 self.val_dataset = LSHDataset(self._val_container)
-                logger.info(f"Validation dataset ready: {len(self.val_dataset)} sequences")
+                logger.debug(f"Validation dataset ready: {len(self.val_dataset)} sequences")
 
         if (stage == "test" or stage is None) and self.test_dataset is None:
-            logger.info("Building test dataset...")
+            logger.debug("Building test dataset...")
             self._test_container = self._build_container("test")
             self.test_dataset = LSHDataset(self._test_container)
-            logger.info(f"Test dataset ready: {len(self.test_dataset)} sequences")
+            logger.debug(f"Test dataset ready: {len(self.test_dataset)} sequences")
 
     def _build_container(self, split: str) -> LSHDataContainer:
         """
@@ -203,7 +203,7 @@ class LSHDataModule(pl.LightningDataModule):
             # Use explicit gauge IDs - no region filter needed
             caravan = CaravanDataSource(base_path=base_path, region=None)
             basins = explicit_gauge_ids
-            logger.info(f"Using {len(basins)} explicitly specified gauge IDs for {split} split")
+            logger.debug(f"Using {len(basins)} explicitly specified gauge IDs for {split} split")
         else:
             # Use region-based discovery (existing behavior)
             region = self.config["data"].get("region")
@@ -214,9 +214,9 @@ class LSHDataModule(pl.LightningDataModule):
             basins = caravan.list_gauge_ids()
             if not basins:
                 raise ValueError(f"No basins found for split '{split}' in {base_path}")
-            logger.info(f"Found {len(basins)} basins from region '{region}' for {split} split")
+            logger.debug(f"Found {len(basins)} basins from region '{region}' for {split} split")
 
-        logger.info(f"Loading data for {len(basins)} basins from {split} split...")
+        logger.debug(f"Loading data for {len(basins)} basins from {split} split...")
 
         # Load time series data
         forcing_columns = self.config["features"]["forcing"]
@@ -238,7 +238,7 @@ class LSHDataModule(pl.LightningDataModule):
         dataset_config = self._build_dataset_config(time_series.feature_names)
 
         # Create sequence index
-        logger.info(f"Finding valid sequences for {split} split...")
+        logger.debug(f"Finding valid sequences for {split} split...")
         sequences = SequenceIndex.find_valid_sequences(
             time_series=time_series,
             input_length=self.config["sequence"]["input_length"],
@@ -253,7 +253,7 @@ class LSHDataModule(pl.LightningDataModule):
             validate=True,
         )
 
-        logger.info(f"Found {len(sequence_index)} valid sequences for {split} split")
+        logger.debug(f"Found {len(sequence_index)} valid sequences for {split} split")
 
         # Create and return container
         return LSHDataContainer(
@@ -389,7 +389,7 @@ class LSHDataModule(pl.LightningDataModule):
                 import joblib
 
                 self._pipeline = joblib.load(self._pipeline_path)
-                logger.info(f"Loaded pipeline from {self._pipeline_path}")
+                logger.debug(f"Loaded pipeline from {self._pipeline_path}")
             else:
                 logger.warning(f"Pipeline path configured but file not found: {self._pipeline_path}")
         return self._pipeline

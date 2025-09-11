@@ -97,8 +97,6 @@ def run_experiment(
                 continue
 
             # Train the model
-            logger.info(f"\nStarting: {model_name} seed={seed}")
-
             try:
                 success = train_single_model(
                     config_path=Path(config_path),
@@ -113,7 +111,6 @@ def run_experiment(
 
                 if success:
                     model_results["successful"] += 1
-                    logger.info(f"✓ Completed: {model_name} seed={seed}")
                 else:
                     model_results["failed_seeds"].append(seed)
                     logger.info(f"✗ Failed: {model_name} seed={seed}")

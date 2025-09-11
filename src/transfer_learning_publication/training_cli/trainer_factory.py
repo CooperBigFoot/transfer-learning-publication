@@ -110,11 +110,9 @@ def train_single_model(
     """
     try:
         # Create model from config
-        logger.info(f"Creating model from config: {config_path}")
         model = ModelFactory.create_from_config(config_path)
 
         # Create data module from same config
-        logger.info(f"Creating data module from config: {config_path}")
         datamodule = LSHDataModule(config_path)
 
         # Create trainer
@@ -127,10 +125,8 @@ def train_single_model(
         )
 
         # Train the model
-        logger.info(f"Starting training for {model_name} with seed={seed}")
         trainer.fit(model, datamodule)
 
-        logger.info(f"Training completed for {model_name} with seed={seed}")
         return True
 
     except Exception as e:

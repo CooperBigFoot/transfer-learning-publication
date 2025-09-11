@@ -3,6 +3,7 @@ Provides minimal, informative progress updates during training.
 """
 
 import logging
+import sys
 from datetime import datetime
 
 from lightning.pytorch.callbacks import Callback
@@ -12,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class MinimalProgressCallback(Callback):
     """
-    Lightning callback that prints minimal progress.
+    Lightning callback that prints minimal progress on a single line.
     """
 
     def __init__(self, model_name: str, seed: int):
@@ -27,28 +28,59 @@ class MinimalProgressCallback(Callback):
         self.model_name = model_name
         self.seed = seed
         self.start_time = None
+        self.last_val_loss = None
 
     def on_train_start(self, trainer, pl_module):
-        """Record training start time."""
+        """Record training start time and print initial message."""
         self.start_time = datetime.now()
+        # Force flush to ensure message appears before progress bar
+        print(f"\nTraining {self.model_name} (seed={self.seed})", flush=True)
 
     def on_train_epoch_start(self, trainer, pl_module):
-        """Log minimal progress at epoch start."""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        """Update progress on single line."""
         current = trainer.current_epoch + 1
         total = trainer.max_epochs
-        logger.info(f"[{timestamp}] Training: model_name={self.model_name}, seed={self.seed}, epoch {current}/{total}")
+
+        # Create progress bar
+        progress = current / total
+        bar_length = 30
+        filled = int(bar_length * progress)
+        bar = '█' * filled + '░' * (bar_length - filled)
+
+        # Build status message
+        if self.last_val_loss is not None:
+            status = f"\r  [{bar}] Epoch {current}/{total} | val_loss: {self.last_val_loss:.4f}"
+        else:
+            status = f"\r  [{bar}] Epoch {current}/{total}"
+
+        # Write to stdout for immediate update
+        sys.stdout.write(status)
+        sys.stdout.flush()
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        """Log validation loss after each validation epoch."""
+        """Update validation loss."""
         if trainer.callback_metrics.get("val_loss") is not None:
-            val_loss = trainer.callback_metrics["val_loss"].item()
-            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            epoch = trainer.current_epoch + 1
-            logger.info(
-                f"[{timestamp}] Validation: model_name={self.model_name}, "
-                f"seed={self.seed}, epoch {epoch}, val_loss={val_loss:.4f}"
-            )
+            self.last_val_loss = trainer.callback_metrics["val_loss"].item()
+
+            # Update the progress line with new validation loss
+            current = trainer.current_epoch + 1
+            total = trainer.max_epochs
+            progress = current / total
+            bar_length = 30
+            filled = int(bar_length * progress)
+            bar = '█' * filled + '░' * (bar_length - filled)
+
+            status = f"\r  [{bar}] Epoch {current}/{total} | val_loss: {self.last_val_loss:.4f}"
+            sys.stdout.write(status)
+            sys.stdout.flush()
+
+    def on_train_end(self, trainer, pl_module):
+        """Print final newline and summary."""
+        # Move to new line after progress bar
+        print()  # Print newline to move past progress bar
+
+        if self.last_val_loss is not None:
+            print(f"✓ Completed {self.model_name} (seed={self.seed}): final val_loss={self.last_val_loss:.4f}")
 
 
 def print_experiment_summary(results: dict):

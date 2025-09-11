@@ -45,3 +45,5 @@ model:
 
 dataloader:
   batch_size: 1024
+  num_workers: 4
+  persistent_workers: true
