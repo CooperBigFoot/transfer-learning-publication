@@ -373,6 +373,34 @@ class LSHDataModule(pl.LightningDataModule):
             collate_fn=collate_fn,
         )
 
+    def get_pipeline(self):
+        """
+        Return the preprocessing pipeline if configured.
+        Lazy loads from disk if needed.
+        
+        Returns:
+            CompositePipeline if configured and available, None otherwise
+        """
+        if self._pipeline is None and self._pipeline_path:
+            from pathlib import Path
+            pipeline_path = Path(self._pipeline_path)
+            if pipeline_path.exists():
+                import joblib
+                self._pipeline = joblib.load(self._pipeline_path)
+                logger.info(f"Loaded pipeline from {self._pipeline_path}")
+            else:
+                logger.warning(f"Pipeline path configured but file not found: {self._pipeline_path}")
+        return self._pipeline
+
+    def get_target_name(self) -> str:
+        """Returns the target column name from config."""
+        return self.config["features"]["target"]
+
+    def get_group_identifier_name(self) -> str:
+        """Returns the group identifier name used by this datamodule."""
+        # This is hardcoded in DatasetConfig but we should expose it
+        return "gauge_id"  # From line 329 in DatasetConfig
+
     def inverse_transform(self, predictions: torch.Tensor) -> torch.Tensor:
         """
         Inverse transform model predictions to original scale.
@@ -385,18 +413,13 @@ class LSHDataModule(pl.LightningDataModule):
         Returns:
             Predictions in original scale
         """
-        if self._pipeline is None:
-            if self._pipeline_path is None:
-                raise ValueError("No pipeline path configured for inverse transform")
-
-            import joblib
-
-            self._pipeline = joblib.load(self._pipeline_path)
-            logger.info(f"Loaded pipeline from {self._pipeline_path}")
+        pipeline = self.get_pipeline()
+        if pipeline is None:
+            raise ValueError("No pipeline configured for inverse transform")
 
         # Implementation depends on CompositePipeline's interface
         # This is a placeholder for the actual implementation
-        return self._pipeline.inverse_transform_target(predictions)
+        return pipeline.inverse_transform_target(predictions)
 
     @property
     def num_features(self) -> int:

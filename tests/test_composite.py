@@ -384,6 +384,174 @@ class TestCompositePipeline:
         np.testing.assert_allclose(inverse_df["temperature"].to_numpy(), temp_mean, rtol=1e-10)
 
 
+class TestCompositePipelineMetadata:
+    """Test metadata tracking in CompositePipeline."""
+
+    @pytest.fixture
+    def sample_dataframe(self):
+        """Create sample test DataFrame."""
+        return pl.DataFrame(
+            {
+                "basin_id": [1, 1, 1, 2, 2, 2],
+                "streamflow": [10.0, 15.0, 12.0, 8.0, 11.0, 9.0],
+                "precipitation": [2.0, 3.0, 2.5, 1.5, 2.8, 1.8],
+                "temperature": [20.0, 22.0, 21.0, 18.0, 19.0, 17.0],
+            }
+        )
+
+    def test_pipeline_stores_fitted_columns(self, sample_dataframe):
+        """Test that pipeline stores fitted columns."""
+        steps = [
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Before fitting, accessing fitted columns should raise error
+        with pytest.raises(RuntimeError, match="Pipeline must be fitted before accessing fitted columns"):
+            pipeline.get_fitted_columns()
+
+        # After fitting, should return all columns
+        pipeline.fit(sample_dataframe)
+        fitted_cols = pipeline.get_fitted_columns()
+
+        assert fitted_cols == sample_dataframe.columns
+        assert "basin_id" in fitted_cols
+        assert "streamflow" in fitted_cols
+        assert "precipitation" in fitted_cols
+        assert "temperature" in fitted_cols
+
+    def test_pipeline_tracks_transformed_columns(self, sample_dataframe):
+        """Test that pipeline tracks which columns were transformed."""
+        steps = [
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["precipitation", "temperature"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Before fitting, accessing transformed columns should raise error
+        with pytest.raises(RuntimeError, match="Pipeline must be fitted before accessing transformed columns"):
+            pipeline.get_transformed_columns()
+
+        # After fitting, should return only transformed columns
+        pipeline.fit(sample_dataframe)
+        transformed_cols = pipeline.get_transformed_columns()
+
+        assert transformed_cols == {"streamflow", "precipitation", "temperature"}
+        assert "basin_id" not in transformed_cols  # Group identifier not transformed
+
+    def test_pipeline_describe_method(self, sample_dataframe):
+        """Test pipeline describe method returns correct structure."""
+        steps = [
+            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["precipitation"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Describe before fitting
+        desc_before = pipeline.describe()
+        assert desc_before["fitted"] is False
+        assert desc_before["fitted_columns"] is None
+        assert desc_before["transformed_columns"] is None
+        assert desc_before["group_identifier"] == "basin_id"
+        assert len(desc_before["steps"]) == 2
+
+        # Describe after fitting
+        pipeline.fit(sample_dataframe)
+        desc_after = pipeline.describe()
+        assert desc_after["fitted"] is True
+        assert desc_after["fitted_columns"] == sample_dataframe.columns
+        assert set(desc_after["transformed_columns"]) == {"streamflow", "precipitation"}
+        assert desc_after["steps"][0]["type"] == "per_basin"
+        assert desc_after["steps"][0]["transforms"] == ["Log"]
+        assert desc_after["steps"][0]["columns"] == ["streamflow"]
+
+    def test_inverse_transform_partial_basic(self, sample_dataframe):
+        """Test basic inverse_transform_partial functionality."""
+        steps = [
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+        pipeline.fit(sample_dataframe)
+
+        # Transform full data
+        transformed_df = pipeline.transform(sample_dataframe)
+
+        # Create partial DataFrame with only streamflow
+        partial_df = transformed_df.select(["basin_id", "streamflow"])
+
+        # Inverse transform partial DataFrame
+        result = pipeline.inverse_transform_partial(partial_df)
+
+        # Should only contain original columns
+        assert result.columns == ["basin_id", "streamflow"]
+
+        # Values should be restored
+        original_streamflow = sample_dataframe["streamflow"].to_numpy()
+        restored_streamflow = result["streamflow"].to_numpy()
+        np.testing.assert_allclose(restored_streamflow, original_streamflow, rtol=1e-10)
+
+    def test_inverse_transform_partial_with_column_mapping(self, sample_dataframe):
+        """Test inverse_transform_partial with column name mapping."""
+        steps = [
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+        pipeline.fit(sample_dataframe)
+
+        # Transform data
+        transformed_df = pipeline.transform(sample_dataframe)
+
+        # Create DataFrame with renamed column (like evaluation results)
+        eval_df = pl.DataFrame({
+            "basin_id": transformed_df["basin_id"],
+            "prediction": transformed_df["streamflow"]  # Renamed from streamflow
+        })
+
+        # Inverse transform with mapping
+        result = pipeline.inverse_transform_partial(
+            eval_df,
+            column_mapping={"prediction": "streamflow"}
+        )
+
+        # Should have original column name (prediction)
+        assert "prediction" in result.columns
+        assert "streamflow" not in result.columns
+
+        # Values should be restored
+        original_streamflow = sample_dataframe["streamflow"].to_numpy()
+        restored_values = result["prediction"].to_numpy()
+        np.testing.assert_allclose(restored_values, original_streamflow, rtol=1e-10)
+
+    def test_inverse_transform_partial_validation(self, sample_dataframe):
+        """Test validation in inverse_transform_partial."""
+        steps = [
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])
+        ]
+        pipeline = CompositePipeline(steps, group_identifier="basin_id")
+
+        # Test before fitting
+        with pytest.raises(RuntimeError, match="Pipeline must be fitted before inverse_transform"):
+            pipeline.inverse_transform_partial(sample_dataframe)
+
+        pipeline.fit(sample_dataframe)
+
+        # Test with invalid column in mapping (from column doesn't exist)
+        invalid_df = pl.DataFrame({"basin_id": [1, 2]})
+        with pytest.raises(ValueError, match="Column 'prediction' not found in DataFrame"):
+            pipeline.inverse_transform_partial(
+                invalid_df,
+                column_mapping={"prediction": "streamflow"}
+            )
+
+        # Test with invalid column in mapping (to column wasn't in fitted data)
+        valid_df = pl.DataFrame({"basin_id": [1, 2], "prediction": [0.5, 1.0]})
+        with pytest.raises(ValueError, match="Column 'invalid_col' was not present during pipeline fitting"):
+            pipeline.inverse_transform_partial(
+                valid_df,
+                column_mapping={"prediction": "invalid_col"}
+            )
+
+
 class TestCompositePipelineJoblib:
     """Test joblib serialization/deserialization of CompositePipeline."""
 
@@ -692,3 +860,32 @@ class TestCompositePipelineJoblib:
             missing_col_df = sample_dataframe.drop("streamflow")
             with pytest.raises(ValueError, match="Columns \\['streamflow'\\] not found"):
                 loaded_pipeline.transform(missing_col_df)
+
+    def test_metadata_survives_serialization(self, multi_step_pipeline, sample_dataframe):
+        """Test that metadata (fitted_columns, transformed_columns) persists through joblib."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            filepath = Path(temp_dir) / "pipeline_metadata.joblib"
+
+            # Fit pipeline and capture metadata
+            multi_step_pipeline.fit(sample_dataframe)
+            original_fitted_cols = multi_step_pipeline.get_fitted_columns()
+            original_transformed_cols = multi_step_pipeline.get_transformed_columns()
+            original_description = multi_step_pipeline.describe()
+
+            # Save and load
+            joblib.dump(multi_step_pipeline, filepath)
+            loaded_pipeline = joblib.load(filepath)
+
+            # Verify metadata is preserved
+            assert loaded_pipeline.get_fitted_columns() == original_fitted_cols
+            assert loaded_pipeline.get_transformed_columns() == original_transformed_cols
+            assert loaded_pipeline.describe() == original_description
+
+            # Test inverse_transform_partial works after loading
+            # First transform the full data
+            transformed_full = loaded_pipeline.transform(sample_dataframe)
+            # Then take a partial slice
+            partial_df = transformed_full.select(["basin_id", "streamflow"])
+            # And test inverse_transform_partial
+            result = loaded_pipeline.inverse_transform_partial(partial_df)
+            assert result.columns == ["basin_id", "streamflow"]

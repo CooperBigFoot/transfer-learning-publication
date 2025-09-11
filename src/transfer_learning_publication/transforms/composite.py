@@ -42,6 +42,8 @@ class CompositePipeline:
         self._fitted_steps: list[PerBasinPipeline | GlobalPipeline] = []
         self._is_fitted = False
         self._group_mapping = {}
+        self._fitted_columns: list[str] = []  # All columns present during fit
+        self._transformed_columns: set[str] = set()  # Columns that were actually transformed
 
     def __repr__(self) -> str:
         return f"CompositePipeline(steps={self.steps}, group_identifier='{self.group_identifier}')"
@@ -156,11 +158,18 @@ class CompositePipeline:
         """
         self._validate_dataframe(df)
 
+        # Store the schema when fitting
+        self._fitted_columns = df.columns.copy()
+        self._transformed_columns = set()
+
         current_df = df
         self._fitted_steps = []
 
         for step in self.steps:
             self._validate_step_columns(current_df, step)
+
+            # Track which columns are actually transformed
+            self._transformed_columns.update(step.columns)
 
             # Convert to numpy array for pipeline processing
             step_array = self._dataframe_to_numpy(current_df, step.columns)
@@ -270,3 +279,119 @@ class CompositePipeline:
             }
             summary.append(step_info)
         return summary
+
+    def get_fitted_columns(self) -> list[str]:
+        """Returns all columns the pipeline was fitted on.
+        
+        Returns:
+            List of column names present during fit
+            
+        Raises:
+            RuntimeError: If pipeline is not fitted
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Pipeline must be fitted before accessing fitted columns")
+        return self._fitted_columns.copy()
+
+    def get_transformed_columns(self) -> set[str]:
+        """Returns only columns that were actually transformed.
+        
+        Returns:
+            Set of column names that were transformed by any step
+            
+        Raises:
+            RuntimeError: If pipeline is not fitted
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Pipeline must be fitted before accessing transformed columns")
+        return self._transformed_columns.copy()
+
+    def describe(self) -> dict[str, Any]:
+        """Returns a description of the pipeline structure for introspection.
+        
+        Returns:
+            Dictionary with pipeline metadata and structure
+        """
+        return {
+            "fitted": self._is_fitted,
+            "fitted_columns": self._fitted_columns if self._is_fitted else None,
+            "transformed_columns": list(self._transformed_columns) if self._is_fitted else None,
+            "group_identifier": self.group_identifier,
+            "steps": [
+                {
+                    "type": step.pipeline_type,
+                    "columns": step.columns,
+                    "transforms": [t.__class__.__name__ for t in step.transforms]
+                }
+                for step in self.steps
+            ]
+        }
+
+    def inverse_transform_partial(
+        self,
+        df: pl.DataFrame,
+        column_mapping: dict[str, str] | None = None
+    ) -> pl.DataFrame:
+        """
+        Inverse transform a DataFrame that may have missing columns.
+        
+        This is perfect for evaluation results where we have 'prediction'/'observation'
+        instead of 'streamflow', and other columns are missing.
+        
+        Missing columns are zero-filled since we drop them afterwards anyway.
+        
+        Args:
+            df: DataFrame with potentially missing columns
+            column_mapping: Map df columns to expected columns 
+                           e.g., {"prediction": "streamflow"}
+        
+        Returns:
+            DataFrame with only the originally present columns (mapped back)
+        
+        Raises:
+            RuntimeError: If pipeline is not fitted
+            ValueError: If mapped columns don't exist in fitted columns
+        """
+        if not self._is_fitted:
+            raise RuntimeError("Pipeline must be fitted before inverse_transform()")
+
+        # Validate column mapping
+        if column_mapping:
+            for from_col, to_col in column_mapping.items():
+                if from_col not in df.columns:
+                    raise ValueError(f"Column '{from_col}' not found in DataFrame")
+                if to_col not in self._fitted_columns:
+                    raise ValueError(f"Column '{to_col}' was not present during pipeline fitting")
+
+        # Apply column mapping (e.g., "prediction" -> "streamflow")
+        working_df = df
+        if column_mapping:
+            working_df = df.rename(column_mapping)
+
+        # Track which columns we started with (after mapping)
+        present_columns = set(working_df.columns)
+
+        # Zero-fill missing columns (except group identifier which should be present)
+        required_columns = set(self._fitted_columns)
+        missing_columns = required_columns - present_columns
+
+        if missing_columns:
+            zero_exprs = [pl.lit(0.0).alias(col) for col in missing_columns]
+            working_df = working_df.with_columns(zero_exprs)
+
+        # Ensure column order matches fitted order
+        working_df = working_df.select(self._fitted_columns)
+
+        # Apply inverse transform using existing method
+        result_df = self.inverse_transform(working_df)
+
+        # Return only originally present columns (with reverse mapping)
+        columns_to_keep = [col for col in self._fitted_columns if col in present_columns]
+        result_df = result_df.select(columns_to_keep)
+
+        # Reverse the column mapping
+        if column_mapping:
+            reverse_mapping = {v: k for k, v in column_mapping.items()}
+            result_df = result_df.rename(reverse_mapping)
+
+        return result_df

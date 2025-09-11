@@ -65,7 +65,7 @@ class TestModelEvaluator:
         with pytest.raises(TypeError, match="must be LSHDataModule"):
             evaluator.add_models({"model1": (model, "not_a_datamodule")})
 
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_test_models_single(self, mock_trainer_class):
         """Test testing a single model."""
         # Setup mock model and datamodule
@@ -101,7 +101,7 @@ class TestModelEvaluator:
         assert "model1" in results.results_dict
         assert results.results_dict["model1"] == forecast_output
 
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_test_models_multiple(self, mock_trainer_class):
         """Test testing multiple models."""
         # Setup mock models and datamodules
@@ -144,7 +144,7 @@ class TestModelEvaluator:
         assert mock_trainer.test.call_count == 2
         assert len(results.results_dict) == 2
 
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_test_models_only_subset(self, mock_trainer_class):
         """Test testing only a subset of models."""
         # Setup mock models
@@ -210,7 +210,7 @@ class TestModelEvaluator:
             evaluator.test_models()
 
     @patch("transfer_learning_publication.models.model_evaluator.joblib.dump")
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_caching_save(self, mock_trainer_class, mock_joblib_dump, tmp_path):
         """Test saving results to cache."""
         # Setup mock model
@@ -245,7 +245,7 @@ class TestModelEvaluator:
         mock_joblib_dump.assert_called_once()
 
     @patch("transfer_learning_publication.models.model_evaluator.joblib.load")
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_caching_load(self, mock_trainer_class, mock_joblib_load, tmp_path):
         """Test loading results from cache."""
         # Setup cache directory
@@ -370,7 +370,7 @@ class TestModelEvaluator:
         is_valid = evaluator.validate_cache(cache_dir, "model2")
         assert not is_valid
 
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_force_recompute(self, mock_trainer_class, tmp_path):
         """Test force_recompute flag ignores cache."""
         # Setup valid cache
@@ -571,7 +571,7 @@ class TestModelEvaluator:
         # Should not raise error
         evaluator.clear_cache(tmp_path / "nonexistent")
 
-    @patch("transfer_learning_publication.models.model_evaluator.pl.Trainer")
+    @patch("transfer_learning_publication.models.model_evaluator.L.Trainer")
     def test_test_model_error_handling(self, mock_trainer_class):
         """Test error handling during model testing."""
         model = MagicMock(spec=BaseLitModel)

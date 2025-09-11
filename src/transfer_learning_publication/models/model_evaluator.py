@@ -6,7 +6,10 @@ from pathlib import Path
 from typing import Any
 
 import joblib
-import lightning as pl
+import lightning as L
+import numpy as np
+import polars as pl
+import torch
 
 from ..contracts import EvaluationResults, ForecastOutput
 from ..data import LSHDataModule
@@ -76,6 +79,7 @@ class ModelEvaluator:
         cache_dir: str | Path | None = None,
         only: list[str] | None = None,
         force_recompute: bool = False,
+        apply_inverse_transform: bool = True,
     ) -> EvaluationResults:
         """Test models and return evaluation results.
 
@@ -86,9 +90,10 @@ class ModelEvaluator:
             cache_dir: Directory for caching results (optional)
             only: List of model names to test (defaults to all)
             force_recompute: Force recomputation even if cache exists
+            apply_inverse_transform: Apply inverse transform if pipeline available (default: True)
 
         Returns:
-            EvaluationResults containing all model outputs
+            EvaluationResults containing all model outputs (optionally inverse transformed)
 
         Raises:
             ValueError: If requested model not found in registry
@@ -140,6 +145,10 @@ class ModelEvaluator:
                 self._save_to_cache(cache_dir, model_name, forecast_output)
                 logger.info(f"Cached results for '{model_name}'")
 
+        # Apply inverse transforms if requested and available
+        if apply_inverse_transform:
+            results_dict = self._apply_inverse_transforms(results_dict)
+
         # Get output length from first model
         first_output = next(iter(results_dict.values()))
         output_length = first_output.predictions.shape[1]
@@ -163,7 +172,7 @@ class ModelEvaluator:
         """
         model, datamodule = self.models_and_datamodules[model_name]
 
-        trainer = pl.Trainer(
+        trainer = L.Trainer(
             **self.trainer_kwargs,
             logger=False,
             enable_progress_bar=True,
@@ -410,6 +419,84 @@ class ModelEvaluator:
             List of model names
         """
         return list(self.models_and_datamodules.keys())
+
+    def _apply_inverse_transforms(self, results_dict: dict[str, ForecastOutput]) -> dict[str, ForecastOutput]:
+        """Apply inverse transforms to model outputs if pipeline available.
+
+        Args:
+            results_dict: Dictionary of model outputs
+
+        Returns:
+            Dictionary with inverse transformed outputs
+        """
+        transformed_results = {}
+
+        for model_name, forecast_output in results_dict.items():
+            _, datamodule = self.models_and_datamodules[model_name]
+            pipeline = datamodule.get_pipeline()
+
+            if pipeline and hasattr(pipeline, "_is_fitted") and pipeline._is_fitted:
+                target_name = datamodule.get_target_name()
+                group_identifier = datamodule.get_group_identifier_name()
+
+                try:
+                    # Convert to DataFrame for transformation using vectorized operations
+                    n_samples = forecast_output.predictions.shape[0]
+                    output_len = forecast_output.predictions.shape[1]
+
+                    # Process predictions - vectorized approach
+                    # Flatten predictions and create repeated group IDs
+                    predictions_flat = forecast_output.predictions.cpu().numpy().reshape(-1)
+                    group_ids_repeated = np.repeat(forecast_output.group_identifiers, output_len)
+
+                    # Create DataFrame directly from arrays
+                    pred_df = pl.DataFrame({group_identifier: group_ids_repeated, "prediction": predictions_flat})
+
+                    # Apply inverse transform to predictions
+                    pred_inverse = pipeline.inverse_transform_partial(
+                        pred_df, column_mapping={"prediction": target_name}
+                    )
+
+                    # Process observations - vectorized approach
+                    observations_flat = forecast_output.observations.cpu().numpy().reshape(-1)
+
+                    # Create DataFrame directly from arrays (reuse group_ids_repeated)
+                    obs_df = pl.DataFrame({group_identifier: group_ids_repeated, "observation": observations_flat})
+
+                    # Apply inverse transform to observations
+                    obs_inverse = pipeline.inverse_transform_partial(
+                        obs_df, column_mapping={"observation": target_name}
+                    )
+
+                    # Reshape back to original format
+                    pred_values = pred_inverse["prediction"].to_numpy()
+                    obs_values = obs_inverse["observation"].to_numpy()
+
+                    # Reshape from flat to [n_samples, output_len]
+                    pred_reshaped = pred_values.reshape(n_samples, output_len)
+                    obs_reshaped = obs_values.reshape(n_samples, output_len)
+
+                    # Create new ForecastOutput with inverse transformed values
+                    transformed_output = ForecastOutput(
+                        predictions=torch.from_numpy(pred_reshaped).float(),
+                        observations=torch.from_numpy(obs_reshaped).float(),
+                        group_identifiers=forecast_output.group_identifiers,
+                        input_end_dates=forecast_output.input_end_dates,
+                    )
+
+                    transformed_results[model_name] = transformed_output
+                    logger.info(f"Applied inverse transform for model '{model_name}'")
+
+                except Exception as e:
+                    logger.warning(f"Failed to apply inverse transform for '{model_name}': {e}")
+                    # Keep original if transform fails
+                    transformed_results[model_name] = forecast_output
+            else:
+                # No pipeline available, keep original
+                transformed_results[model_name] = forecast_output
+                logger.debug(f"No pipeline available for '{model_name}', keeping original values")
+
+        return transformed_results
 
     def clear_cache(self, cache_dir: str | Path, model_names: list[str] | None = None) -> None:
         """Clear cached results.

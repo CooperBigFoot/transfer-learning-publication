@@ -627,8 +627,9 @@ class TestLSHDataModule:
         assert dm.target_name == "streamflow"
         assert dm.is_autoregressive is True
 
+    @patch("pathlib.Path.exists")
     @patch("joblib.load")
-    def test_inverse_transform_with_pipeline(self, mock_joblib_load, tmp_path):
+    def test_inverse_transform_with_pipeline(self, mock_joblib_load, mock_exists, tmp_path):
         """Test inverse_transform with pipeline loaded."""
         config = {
             "data": {
@@ -649,6 +650,9 @@ class TestLSHDataModule:
         config_path = tmp_path / "config.yaml"
         with open(config_path, "w") as f:
             yaml.dump(config, f)
+
+        # Mock that file exists
+        mock_exists.return_value = True
 
         # Mock pipeline
         mock_pipeline = MagicMock()
@@ -685,7 +689,7 @@ class TestLSHDataModule:
         dm = LSHDataModule(config_path)
 
         predictions = torch.tensor([0.5, 1.5])
-        with pytest.raises(ValueError, match="No pipeline path configured"):
+        with pytest.raises(ValueError, match="No pipeline configured for inverse transform"):
             dm.inverse_transform(predictions)
 
     def test_get_config_dict(self, tmp_path):
@@ -731,6 +735,80 @@ class TestLSHDataModule:
         assert config_dict["is_autoregressive"] is True
         assert config_dict["group_identifier_name"] == "gauge_id"
         assert config_dict["include_dates"] is True
+
+    def test_get_pipeline_method(self, tmp_path):
+        """Test get_pipeline method returns pipeline when configured."""
+        config = {
+            "data": {
+                "base_path": str(tmp_path),
+                "region": "test",
+                "pipeline_path": "/fake/path/pipeline.joblib",  # Won't be loaded in test
+            },
+            "features": {
+                "forcing": ["streamflow"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+
+        # Initially should be None (not loaded yet)
+        assert dm._pipeline is None
+
+        # get_pipeline returns None when path doesn't exist
+        pipeline = dm.get_pipeline()
+        assert pipeline is None  # Path doesn't exist so can't load
+
+    def test_get_target_name(self, tmp_path):
+        """Test get_target_name returns correct target from config."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        assert dm.get_target_name() == "streamflow"
+
+    def test_get_group_identifier_name(self, tmp_path):
+        """Test get_group_identifier_name returns correct identifier."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 1},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        dm = LSHDataModule(config_path)
+        # Currently hardcoded as "gauge_id" in the implementation
+        assert dm.get_group_identifier_name() == "gauge_id"
 
     def test_get_config_dict_minimal(self, tmp_path):
         """Test get_config_dict with minimal configuration."""
