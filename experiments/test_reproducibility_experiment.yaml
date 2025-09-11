@@ -1,0 +1,8 @@
+# Test experiment for verifying reproducibility
+# Uses minimal configuration for fast testing
+
+models:
+  tide: configs/test_reproducibility.yaml
+
+trainer:
+  max_epochs: 2  # Very few epochs for fast testing

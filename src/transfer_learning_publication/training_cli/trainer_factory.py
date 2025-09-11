@@ -79,9 +79,6 @@ def create_trainer(
         devices=1,
     )
 
-    # Set seed for reproducibility
-    pl.seed_everything(seed, workers=True)
-
     return trainer
 
 
@@ -109,6 +106,9 @@ def train_single_model(
         True if successful, False if training failed
     """
     try:
+        # Set seed BEFORE creating model to ensure weight initialization is deterministic
+        pl.seed_everything(seed, workers=True)
+        
         # Create model from config
         model = ModelFactory.create_from_config(config_path)
 

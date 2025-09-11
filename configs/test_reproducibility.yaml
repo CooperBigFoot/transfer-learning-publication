@@ -1,0 +1,40 @@
+# Minimal configuration for reproducibility testing
+# Uses smallest possible settings for fast test execution
+
+data:
+  base_path: "/Users/cooper/Desktop/first-test"
+  gauge_ids: ["tajikkyrgyz_15013"] # Single gauge for speed
+  pipeline_path: "/Users/cooper/Desktop/first-test/ts_pipeline.joblib"
+
+features:
+  forcing:
+    [
+      "streamflow",
+      "temperature_2m_mean",
+      "total_precipitation_sum",
+      "sin_day_of_year",
+      "cos_day_of_year",
+    ]
+  static: ["area", "ele_mt_sav"]
+  target: "streamflow"
+
+sequence:
+  input_length: 10
+  output_length: 5
+
+data_preparation:
+  is_autoregressive: true
+  include_dates: true
+
+model:
+  type: "tide"  # Use TIDE model which has trainable parameters
+  overrides:
+    scheduler_patience: 5
+    hidden_size: 32  # Small for fast testing
+    num_encoder_layers: 1
+    num_decoder_layers: 1
+
+dataloader:
+  batch_size: 32
+  num_workers: 0 # 0 for reproducibility
+  shuffle_train: true # Test that shuffling is still deterministic with seed

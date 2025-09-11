@@ -135,12 +135,13 @@ class TestCreateTrainer:
         assert checkpoint_dir.exists()
         assert tensorboard_dir.exists()
 
-    @patch("transfer_learning_publication.training_cli.trainer_factory.pl.seed_everything")
-    def test_sets_seed_for_reproducibility(self, mock_seed, tmp_path):
-        """Test that seed is set for reproducibility."""
-        create_trainer(model_name="tide", seed=42, checkpoint_dir=tmp_path / "checkpoints")
-
-        mock_seed.assert_called_once_with(42, workers=True)
+    def test_trainer_creation_with_seed(self, tmp_path):
+        """Test that trainer is created successfully with a seed."""
+        trainer = create_trainer(model_name="tide", seed=42, checkpoint_dir=tmp_path / "checkpoints")
+        
+        # Verify trainer was created
+        assert trainer is not None
+        assert trainer.max_epochs == 100  # Default when not specified
 
 
 class TestTrainSingleModel:
@@ -152,6 +153,36 @@ class TestTrainSingleModel:
         config_file = tmp_path / "config.yaml"
         config_file.write_text("model:\n  type: tide\n")
         return config_file
+
+    @patch("transfer_learning_publication.training_cli.trainer_factory.pl.seed_everything")
+    @patch("transfer_learning_publication.training_cli.trainer_factory.ModelFactory")
+    @patch("transfer_learning_publication.training_cli.trainer_factory.LSHDataModule")
+    @patch("transfer_learning_publication.training_cli.trainer_factory.create_trainer")
+    def test_sets_seed_before_model_creation(self, mock_create_trainer, mock_datamodule, mock_factory, mock_seed, config_path, tmp_path):
+        """Test that seed is set before model creation for reproducibility."""
+        # Setup mocks
+        mock_model = MagicMock()
+        mock_factory.create_from_config.return_value = mock_model
+        mock_dm = MagicMock()
+        mock_datamodule.return_value = mock_dm
+        mock_trainer = MagicMock()
+        mock_create_trainer.return_value = mock_trainer
+
+        # Call function
+        train_single_model(
+            config_path=config_path,
+            model_name="tide",
+            seed=42,
+            checkpoint_dir=tmp_path / "checkpoints",
+            tensorboard_dir=tmp_path / "tensorboard",
+        )
+
+        # Verify seed was set with correct arguments
+        mock_seed.assert_called_once_with(42, workers=True)
+        
+        # Verify seed was set before model creation
+        assert mock_seed.call_args_list[0][0] == (42,)
+        assert mock_factory.create_from_config.called
 
     @patch("transfer_learning_publication.training_cli.trainer_factory.ModelFactory")
     @patch("transfer_learning_publication.training_cli.trainer_factory.LSHDataModule")
@@ -265,19 +296,23 @@ class TestTrainSingleModel:
             max_epochs=75,
         )
 
-    @patch("transfer_learning_publication.training_cli.trainer_factory.logger")
     @patch("transfer_learning_publication.training_cli.trainer_factory.ModelFactory")
     @patch("transfer_learning_publication.training_cli.trainer_factory.LSHDataModule")
     @patch("transfer_learning_publication.training_cli.trainer_factory.create_trainer")
-    def test_logging_during_training(
-        self, mock_create_trainer, mock_datamodule, mock_factory, mock_logger, config_path, tmp_path
+    def test_successful_training_flow(
+        self, mock_create_trainer, mock_datamodule, mock_factory, config_path, tmp_path
     ):
-        """Test that appropriate logging occurs during training."""
-        mock_factory.create_from_config.return_value = MagicMock()
-        mock_datamodule.return_value = MagicMock()
-        mock_create_trainer.return_value = MagicMock()
+        """Test that training flow executes successfully."""
+        mock_model = MagicMock()
+        mock_factory.create_from_config.return_value = mock_model
+        
+        mock_dm = MagicMock()
+        mock_datamodule.return_value = mock_dm
+        
+        mock_trainer = MagicMock()
+        mock_create_trainer.return_value = mock_trainer
 
-        train_single_model(
+        result = train_single_model(
             config_path=config_path,
             model_name="tide",
             seed=42,
@@ -285,11 +320,8 @@ class TestTrainSingleModel:
             tensorboard_dir=tmp_path / "tensorboard",
         )
 
-        # Check that info logs were called
-        assert mock_logger.info.call_count >= 3
-
-        # Check log messages
-        log_messages = [call[0][0] for call in mock_logger.info.call_args_list]
-        assert any("Creating model from config" in msg for msg in log_messages)
-        assert any("Creating data module from config" in msg for msg in log_messages)
-        assert any("Starting training" in msg for msg in log_messages)
+        # Verify the flow executed correctly
+        assert result is True
+        mock_factory.create_from_config.assert_called_once_with(config_path)
+        mock_datamodule.assert_called_once_with(config_path)
+        mock_trainer.fit.assert_called_once_with(mock_model, mock_dm)

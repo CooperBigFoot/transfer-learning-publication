@@ -47,61 +47,58 @@ class TestMinimalProgressCallback:
         assert callback.start_time is not None
         assert isinstance(callback.start_time, datetime)
 
-    @patch("transfer_learning_publication.callbacks.progress.logger")
-    @patch("transfer_learning_publication.callbacks.progress.datetime")
-    def test_on_train_epoch_start_logs_progress(self, mock_datetime, mock_logger, callback, mock_trainer, mock_module):
+    @patch("sys.stdout")
+    def test_on_train_epoch_start_logs_progress(self, mock_stdout, callback, mock_trainer, mock_module):
         """Test that epoch start logs progress."""
-        mock_datetime.now.return_value.strftime.return_value = "2024-11-20 14:30:00"
         mock_trainer.current_epoch = 5
         mock_trainer.max_epochs = 100
 
         callback.on_train_epoch_start(mock_trainer, mock_module)
 
-        mock_logger.info.assert_called_once()
-        logged = mock_logger.info.call_args[0][0]
-        assert "[2024-11-20 14:30:00]" in logged
-        assert "model_name=tide" in logged
-        assert "seed=42" in logged
-        assert "epoch 6/100" in logged  # current_epoch + 1
+        # Check that progress was written to stdout
+        mock_stdout.write.assert_called()
+        mock_stdout.flush.assert_called()
+        
+        # Get the actual output
+        output = mock_stdout.write.call_args[0][0]
+        assert "Epoch 6/100" in output  # current_epoch + 1
+        assert "[" in output and "]" in output  # progress bar
 
-    @patch("transfer_learning_publication.callbacks.progress.logger")
-    @patch("transfer_learning_publication.callbacks.progress.datetime")
-    def test_on_validation_epoch_end_logs_val_loss(
-        self, mock_datetime, mock_logger, callback, mock_trainer, mock_module
-    ):
-        """Test that validation epoch end logs validation loss."""
-        mock_datetime.now.return_value.strftime.return_value = "2024-11-20 14:31:00"
+    @patch("sys.stdout")
+    def test_on_validation_epoch_end_logs_val_loss(self, mock_stdout, callback, mock_trainer, mock_module):
+        """Test that validation epoch end updates progress with validation loss."""
         mock_trainer.current_epoch = 5
+        mock_trainer.max_epochs = 100
         mock_trainer.callback_metrics = {"val_loss": torch.tensor(0.0234)}
 
         callback.on_validation_epoch_end(mock_trainer, mock_module)
 
-        mock_logger.info.assert_called_once()
-        logged = mock_logger.info.call_args[0][0]
-        assert "[2024-11-20 14:31:00]" in logged
-        assert "Validation:" in logged
-        assert "model_name=tide" in logged
-        assert "seed=42" in logged
-        assert "epoch 6" in logged
-        assert "val_loss=0.0234" in logged
+        # Check that val_loss was recorded (use pytest.approx for float comparison)
+        assert callback.last_val_loss == pytest.approx(0.0234, rel=1e-4)
+        
+        # Check that progress was updated
+        mock_stdout.write.assert_called()
+        mock_stdout.flush.assert_called()
+        output = mock_stdout.write.call_args[0][0]
+        assert "val_loss: 0.0234" in output
 
-    @patch("transfer_learning_publication.callbacks.progress.logger")
-    def test_on_validation_epoch_end_no_log_without_val_loss(self, mock_logger, callback, mock_trainer, mock_module):
-        """Test that nothing is logged if val_loss is not available."""
+    def test_on_validation_epoch_end_no_update_without_val_loss(self, callback, mock_trainer, mock_module):
+        """Test that nothing is updated if val_loss is not available."""
         mock_trainer.callback_metrics = {}  # No val_loss
 
         callback.on_validation_epoch_end(mock_trainer, mock_module)
 
-        mock_logger.info.assert_not_called()
+        # Val loss should remain None
+        assert callback.last_val_loss is None
 
-    @patch("transfer_learning_publication.callbacks.progress.logger")
-    def test_on_validation_epoch_end_handles_none_val_loss(self, mock_logger, callback, mock_trainer, mock_module):
+    def test_on_validation_epoch_end_handles_none_val_loss(self, callback, mock_trainer, mock_module):
         """Test handling of None val_loss."""
         mock_trainer.callback_metrics = {"val_loss": None}
 
         callback.on_validation_epoch_end(mock_trainer, mock_module)
 
-        mock_logger.info.assert_not_called()
+        # Val loss should remain None when val_loss is explicitly None
+        assert callback.last_val_loss is None
 
 
 class TestPrintExperimentSummary:

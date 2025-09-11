@@ -289,3 +289,58 @@ class TestRunExperiment:
 
         with pytest.raises(ValueError, match="must have a 'models' section"):
             run_experiment(config_path)
+
+    def test_seed_consistency_in_checkpoint_paths(self, experiment_config_file):
+        """Test that checkpoint paths correctly include seed values."""
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+            mock_train.return_value = True
+
+            # Run with multiple seeds
+            run_experiment(experiment_config_file, models=["tide"], n_runs=3, start_seed=100)
+
+            # Verify checkpoint paths include correct seeds
+            for call in mock_train.call_args_list:
+                checkpoint_dir = call[1]["checkpoint_dir"]
+                seed = call[1]["seed"]
+                assert f"seed{seed}" in str(checkpoint_dir)
+
+    def test_deterministic_seed_sequence(self, experiment_config_file):
+        """Test that seeds are generated deterministically."""
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+            mock_train.return_value = True
+            
+            # Mock is_run_complete to return False so training happens
+            with patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
+                mock_complete.return_value = False
+
+                # First run
+                run_experiment(experiment_config_file, models=["tide"], n_runs=5, start_seed=42)
+                seeds_run1 = [call[1]["seed"] for call in mock_train.call_args_list]
+
+                # Reset mock
+                mock_train.reset_mock()
+
+                # Second run with same parameters
+                run_experiment(experiment_config_file, models=["tide"], n_runs=5, start_seed=42)
+                seeds_run2 = [call[1]["seed"] for call in mock_train.call_args_list]
+
+                # Seeds should be identical and sequential
+                assert seeds_run1 == seeds_run2 == [42, 43, 44, 45, 46]
+
+    def test_fresh_flag_overwrites_same_seed_runs(self, experiment_config_file, tmp_path):
+        """Test that fresh flag allows rerunning with the same seed."""
+        with patch("transfer_learning_publication.training_cli.orchestrator.train_single_model") as mock_train:
+            mock_train.return_value = True
+
+            # Mock is_run_complete to always return True (simulating existing runs)
+            with patch("transfer_learning_publication.training_cli.orchestrator.is_run_complete") as mock_complete:
+                mock_complete.return_value = True
+
+                # Without fresh flag - should skip
+                run_experiment(experiment_config_file, models=["tide"], n_runs=1, start_seed=42, fresh=False)
+                assert mock_train.call_count == 0
+
+                # With fresh flag - should run despite existing
+                run_experiment(experiment_config_file, models=["tide"], n_runs=1, start_seed=42, fresh=True)
+                assert mock_train.call_count == 1
+                assert mock_train.call_args[1]["seed"] == 42

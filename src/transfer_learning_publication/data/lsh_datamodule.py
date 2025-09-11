@@ -354,6 +354,10 @@ class LSHDataModule(pl.LightningDataModule):
         """
         Create a DataLoader with configuration.
 
+        Design decision: Data loading is always deterministic (seed=42)
+        to ensure reproducibility across experiments. Model training 
+        randomness is controlled separately via the --seed parameter.
+
         Args:
             dataset: Dataset to wrap
             shuffle: Whether to shuffle data
@@ -363,6 +367,10 @@ class LSHDataModule(pl.LightningDataModule):
         """
         dl_config = self.config["dataloader"]
 
+        # Create generator with fixed seed for reproducible shuffling
+        generator = torch.Generator()
+        generator.manual_seed(42)  # Hardcoded for data reproducibility
+
         return DataLoader(
             dataset,
             batch_size=dl_config["batch_size"],
@@ -371,6 +379,7 @@ class LSHDataModule(pl.LightningDataModule):
             pin_memory=dl_config.get("pin_memory", False),
             persistent_workers=dl_config.get("persistent_workers", False) and dl_config.get("num_workers", 0) > 0,
             collate_fn=collate_fn,
+            generator=generator if shuffle else None,  # Only use generator when shuffling
         )
 
     def get_pipeline(self):
