@@ -234,7 +234,7 @@ class TestModelEvaluator:
         evaluator.add_models({"model1": (model, datamodule)})
 
         cache_dir = tmp_path / "cache"
-        results = evaluator.test_models(cache_dir=cache_dir)
+        evaluator.test_models(cache_dir=cache_dir)
 
         # Verify cache structure created
         assert (cache_dir / "model_name=model1").exists()
@@ -402,7 +402,7 @@ class TestModelEvaluator:
         evaluator.add_models({"model1": (model, datamodule)})
 
         # Test with force_recompute
-        results = evaluator.test_models(cache_dir=cache_dir, force_recompute=True)
+        evaluator.test_models(cache_dir=cache_dir, force_recompute=True)
 
         # Verify trainer WAS called despite cache
         mock_trainer.test.assert_called_once()

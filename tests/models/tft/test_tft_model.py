@@ -134,7 +134,7 @@ class TestStaticCovariateEncoder:
 
         assert isinstance(contexts, dict)
         # The actual number of context vectors is determined internally
-        for key, context in contexts.items():
+        for _key, context in contexts.items():
             assert context.shape == (8, 32)
 
 

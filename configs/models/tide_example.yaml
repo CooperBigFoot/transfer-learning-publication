@@ -1,0 +1,64 @@
+# Example TiDE model configuration
+# This configuration includes both data and model settings
+
+# Data configuration
+data:
+  base_path: "/Users/cooper/Desktop/first-test"
+  gauge_ids: ["tajikkyrgyz_15013", "tajikkyrgyz_15016", "tajikkyrgyz_15020"]
+  pipeline_path: "/Users/cooper/Desktop/first-test/ts_pipeline.joblib"
+
+# Feature configuration
+features:
+  forcing:
+    - "temperature_2m_max"
+    - "temperature_2m_min"
+    - "potential_evaporation_sum_FAO_PENMAN_MONTEITH"
+    - "potential_evaporation_sum_ERA5_LAND"
+    - "temperature_2m_mean"
+    - "total_precipitation_sum"
+    - "streamflow"
+    - "streamflow_was_filled"
+    - "sin_day_of_year"
+    - "cos_day_of_year"
+  static:
+    - "p_mean"
+    - "area"
+    - "ele_mt_sav"
+    - "high_prec_dur"
+    - "frac_snow"
+    - "high_prec_freq"
+    - "slp_dg_sav"
+    - "cly_pc_sav"
+    - "aridity_ERA5_LAND"
+    - "aridity_FAO_PM"
+  target: "streamflow"
+
+# Sequence configuration
+sequence:
+  input_length: 365
+  output_length: 10
+
+# Data preparation
+data_preparation:
+  is_autoregressive: true
+  include_dates: true
+
+# Model configuration
+model:
+  type: "tide"
+  # Optional: specify hyperparameters directly or via external file
+  # config_file: "configs/hyperparameters/tide_best.yaml"
+  # overrides:
+  #   hidden_size: 256
+  #   num_encoder_layers: 2
+  #   num_decoder_layers: 2
+  #   dropout: 0.1
+  #   learning_rate: 0.001
+
+# DataLoader configuration
+dataloader:
+  batch_size: 256
+  num_workers: 4
+  pin_memory: true
+  persistent_workers: true
+  shuffle_train: true

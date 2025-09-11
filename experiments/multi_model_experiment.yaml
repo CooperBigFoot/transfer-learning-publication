@@ -1,0 +1,23 @@
+# Multi-model experiment configuration
+# This example shows how to train multiple models in a single experiment
+#
+# Usage:
+#   tl-train experiments/multi_model_experiment.yaml --n-runs 5
+#   tl-train experiments/multi_model_experiment.yaml --models tide,ealstm
+#   tl-train experiments/multi_model_experiment.yaml --fresh  # Force restart
+
+models:
+  # Multiple models can be trained in a single experiment
+  # Each will be trained with the same number of seeds
+  
+  tide_baseline: configs/models/tide_example.yaml
+  ealstm_baseline: configs/models/ealstm_example.yaml
+  
+  # You can have multiple configurations of the same model type
+  # tide_tuned: configs/models/tide_tuned.yaml
+  # tide_large: configs/models/tide_large.yaml
+  
+  # Add more models as needed
+  # tsmixer: configs/models/tsmixer_example.yaml
+  # tft: configs/models/tft_example.yaml
+  # dummy: configs/models/dummy_example.yaml

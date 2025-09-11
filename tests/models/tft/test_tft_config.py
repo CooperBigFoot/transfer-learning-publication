@@ -127,7 +127,7 @@ class TestTFTConfig:
         assert config_dict["lstm_layers"] == 1
         assert config_dict["num_attention_heads"] == 4
         assert "learning_rate" in config_dict
-        assert "_" not in [k[0] for k in config_dict.keys()]  # No private attributes
+        assert "_" not in [k[0] for k in config_dict]  # No private attributes
 
     def test_update(self):
         """Test updating config parameters."""

@@ -1,0 +1,5 @@
+# Test experiment configuration
+# Simple configuration using the existing first_run.yaml config
+
+models:
+  tide_test: configs/first_run.yaml

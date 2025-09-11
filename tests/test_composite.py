@@ -401,9 +401,7 @@ class TestCompositePipelineMetadata:
 
     def test_pipeline_stores_fitted_columns(self, sample_dataframe):
         """Test that pipeline stores fitted columns."""
-        steps = [
-            CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"])
-        ]
+        steps = [CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"])]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
 
         # Before fitting, accessing fitted columns should raise error
@@ -424,7 +422,9 @@ class TestCompositePipelineMetadata:
         """Test that pipeline tracks which columns were transformed."""
         steps = [
             CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
-            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["precipitation", "temperature"])
+            CompositePipelineStep(
+                pipeline_type="global", transforms=[ZScore()], columns=["precipitation", "temperature"]
+            ),
         ]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
 
@@ -443,7 +443,7 @@ class TestCompositePipelineMetadata:
         """Test pipeline describe method returns correct structure."""
         steps = [
             CompositePipelineStep(pipeline_type="per_basin", transforms=[Log()], columns=["streamflow"]),
-            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["precipitation"])
+            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["precipitation"]),
         ]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
 
@@ -468,7 +468,9 @@ class TestCompositePipelineMetadata:
     def test_inverse_transform_partial_basic(self, sample_dataframe):
         """Test basic inverse_transform_partial functionality."""
         steps = [
-            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"])
+            CompositePipelineStep(
+                pipeline_type="global", transforms=[ZScore()], columns=["streamflow", "precipitation"]
+            )
         ]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
         pipeline.fit(sample_dataframe)
@@ -492,9 +494,7 @@ class TestCompositePipelineMetadata:
 
     def test_inverse_transform_partial_with_column_mapping(self, sample_dataframe):
         """Test inverse_transform_partial with column name mapping."""
-        steps = [
-            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])
-        ]
+        steps = [CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
         pipeline.fit(sample_dataframe)
 
@@ -502,16 +502,15 @@ class TestCompositePipelineMetadata:
         transformed_df = pipeline.transform(sample_dataframe)
 
         # Create DataFrame with renamed column (like evaluation results)
-        eval_df = pl.DataFrame({
-            "basin_id": transformed_df["basin_id"],
-            "prediction": transformed_df["streamflow"]  # Renamed from streamflow
-        })
+        eval_df = pl.DataFrame(
+            {
+                "basin_id": transformed_df["basin_id"],
+                "prediction": transformed_df["streamflow"],  # Renamed from streamflow
+            }
+        )
 
         # Inverse transform with mapping
-        result = pipeline.inverse_transform_partial(
-            eval_df,
-            column_mapping={"prediction": "streamflow"}
-        )
+        result = pipeline.inverse_transform_partial(eval_df, column_mapping={"prediction": "streamflow"})
 
         # Should have original column name (prediction)
         assert "prediction" in result.columns
@@ -524,9 +523,7 @@ class TestCompositePipelineMetadata:
 
     def test_inverse_transform_partial_validation(self, sample_dataframe):
         """Test validation in inverse_transform_partial."""
-        steps = [
-            CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])
-        ]
+        steps = [CompositePipelineStep(pipeline_type="global", transforms=[ZScore()], columns=["streamflow"])]
         pipeline = CompositePipeline(steps, group_identifier="basin_id")
 
         # Test before fitting
@@ -538,18 +535,12 @@ class TestCompositePipelineMetadata:
         # Test with invalid column in mapping (from column doesn't exist)
         invalid_df = pl.DataFrame({"basin_id": [1, 2]})
         with pytest.raises(ValueError, match="Column 'prediction' not found in DataFrame"):
-            pipeline.inverse_transform_partial(
-                invalid_df,
-                column_mapping={"prediction": "streamflow"}
-            )
+            pipeline.inverse_transform_partial(invalid_df, column_mapping={"prediction": "streamflow"})
 
         # Test with invalid column in mapping (to column wasn't in fitted data)
         valid_df = pl.DataFrame({"basin_id": [1, 2], "prediction": [0.5, 1.0]})
         with pytest.raises(ValueError, match="Column 'invalid_col' was not present during pipeline fitting"):
-            pipeline.inverse_transform_partial(
-                valid_df,
-                column_mapping={"prediction": "invalid_col"}
-            )
+            pipeline.inverse_transform_partial(valid_df, column_mapping={"prediction": "invalid_col"})
 
 
 class TestCompositePipelineJoblib:

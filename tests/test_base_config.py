@@ -87,7 +87,7 @@ class TestBaseConfig:
         assert config_dict["static_size"] == 7
         assert config_dict["learning_rate"] == 1e-5
         assert config_dict["use_rev_in"] is True
-        assert "_" not in [k[0] for k in config_dict.keys()]  # No private attributes
+        assert "_" not in [k[0] for k in config_dict]  # No private attributes
 
     def test_update(self):
         """Test updating config parameters."""

@@ -380,7 +380,7 @@ class TestLSHDataModule:
         with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
             mock_find.return_value = torch.tensor([[0, 0, 11], [0, 1, 12], [1, 0, 11]])
 
-            container = dm._build_container("train")
+            dm._build_container("train")
 
         # Verify CaravanDataSource was initialized with region=None (no region filter)
         mock_caravan_class.assert_called_with(base_path=tmp_path / "train", region=None)

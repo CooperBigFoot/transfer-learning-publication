@@ -33,7 +33,8 @@
       "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/REGION_NAME=tajikkyrgyz/**)",
       "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/train/**)",
       "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/val/**)",
-      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/**)"
+      "Read(//Users/cooper/Desktop/CARAVAN_CLEAN/**)",
+      "Bash(tl-train:*)"
     ],
     "deny": [],
     "ask": []

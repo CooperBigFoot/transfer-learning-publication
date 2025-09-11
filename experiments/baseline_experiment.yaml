@@ -1,0 +1,5 @@
+models:
+  tide: configs/first_run.yaml
+
+trainer:
+  max_epochs: 10

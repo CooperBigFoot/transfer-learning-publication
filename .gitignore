@@ -23,3 +23,5 @@ logs/
 
 lightning_logs/
 checkpoints/
+
+tensorboard/

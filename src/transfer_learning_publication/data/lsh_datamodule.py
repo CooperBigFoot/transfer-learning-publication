@@ -377,15 +377,17 @@ class LSHDataModule(pl.LightningDataModule):
         """
         Return the preprocessing pipeline if configured.
         Lazy loads from disk if needed.
-        
+
         Returns:
             CompositePipeline if configured and available, None otherwise
         """
         if self._pipeline is None and self._pipeline_path:
             from pathlib import Path
+
             pipeline_path = Path(self._pipeline_path)
             if pipeline_path.exists():
                 import joblib
+
                 self._pipeline = joblib.load(self._pipeline_path)
                 logger.info(f"Loaded pipeline from {self._pipeline_path}")
             else:
