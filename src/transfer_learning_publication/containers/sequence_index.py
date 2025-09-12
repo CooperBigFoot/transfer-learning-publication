@@ -303,12 +303,22 @@ class SequenceIndex:
         time_series: TimeSeriesCollection,
         input_length: int,
         output_length: int,
+        target_was_filled: list[torch.Tensor] | None = None,
     ) -> torch.LongTensor:
         """
         Generate all valid sequence indices for the time series.
 
-        Since TimeSeriesCollection guarantees no NaNs, this simply
-        creates all possible sliding windows of the required length.
+        Args:
+            time_series: TimeSeriesCollection with time series data
+            input_length: Length of input sequences
+            output_length: Length of output sequences
+            target_was_filled: Optional list of binary tensors indicating
+                              which target values were filled (1) vs original (0).
+                              If provided, filters out sequences where the output
+                              window contains any filled target values.
+
+        Returns:
+            Tensor of shape (n_sequences, 3) with [group_idx, start_idx, end_idx]
         """
         total_length = input_length + output_length
         sequences = []
@@ -320,12 +330,45 @@ class SequenceIndex:
             if group_length < total_length:
                 continue
 
-            # Generate all valid start positions
-            n_valid_starts = group_length - total_length + 1
+            # If target_was_filled is provided, use efficient filtering
+            if target_was_filled is not None and group_idx < len(target_was_filled):
+                flag_tensor = target_was_filled[group_idx]
+                
+                # Convert flags: 0 = not filled (valid), 1 = filled (invalid)
+                # We want to find where output window has NO filled values
+                # So we invert: 1 = valid, 0 = filled
+                is_valid = (1 - flag_tensor).float()
+                
+                # Use convolution to check each possible output window
+                kernel = torch.ones(1, 1, output_length, dtype=torch.float32)
+                
+                # Convolve to count valid positions in each output window
+                valid_counts = torch.nn.functional.conv1d(
+                    is_valid.view(1, 1, -1),  # Shape: (batch=1, channel=1, length)
+                    kernel,
+                    padding=0
+                ).squeeze()
+                
+                # Find positions where ALL output values are valid (count == output_length)
+                # These positions indicate the START of valid output windows
+                valid_output_starts = torch.where(valid_counts == output_length)[0]
+                
+                # For each valid output window start, check if we can fit the full sequence
+                for output_start in valid_output_starts:
+                    # The sequence starts input_length before the output window
+                    start_idx = output_start.item() - input_length
+                    end_idx = start_idx + total_length
+                    
+                    # Ensure the sequence fits within the group
+                    if start_idx >= 0 and end_idx <= group_length:
+                        sequences.append([group_idx, start_idx, end_idx])
+            else:
+                # Original behavior when no flags provided
+                n_valid_starts = group_length - total_length + 1
 
-            for start_idx in range(n_valid_starts):
-                end_idx = start_idx + total_length
-                sequences.append([group_idx, start_idx, end_idx])
+                for start_idx in range(n_valid_starts):
+                    end_idx = start_idx + total_length
+                    sequences.append([group_idx, start_idx, end_idx])
 
         if sequences:
             return torch.tensor(sequences, dtype=torch.long)

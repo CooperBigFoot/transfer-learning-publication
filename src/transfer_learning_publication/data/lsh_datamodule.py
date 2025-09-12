@@ -226,8 +226,11 @@ class LSHDataModule(pl.LightningDataModule):
         static_columns = self.config["features"]["static"]
         static_lf = caravan.get_static_attributes(gauge_ids=basins, columns=static_columns)
 
-        # Convert to collections
-        time_series = caravan.to_time_series_collection(ts_lf)
+        # Get target column name from config
+        target_name = self.config["features"]["target"]
+        
+        # Convert to collections (passing target to extract filled flags)
+        time_series = caravan.to_time_series_collection(ts_lf, target_column=target_name)
         static_attributes = caravan.to_static_attribute_collection(static_lf)
 
         # Validate we got the expected features (order-independent)
@@ -243,6 +246,7 @@ class LSHDataModule(pl.LightningDataModule):
             time_series=time_series,
             input_length=self.config["sequence"]["input_length"],
             output_length=self.config["sequence"]["output_length"],
+            target_was_filled=time_series.target_was_filled,  # Pass the flags if available
         )
 
         sequence_index = SequenceIndex(

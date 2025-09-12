@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import geopandas as gpd
@@ -5,6 +6,8 @@ import pandas as pd
 import polars as pl
 
 from ..containers import StaticAttributeCollection, TimeSeriesCollection
+
+logger = logging.getLogger(__name__)
 
 
 class CaravanDataSource:
@@ -569,7 +572,7 @@ class CaravanDataSource:
         n_attributes = len([col for col in df.columns if col != "gauge_id"])
         logger.info(f"Wrote {n_gauges} gauges with {n_attributes} attributes to {output_file}")
 
-    def to_time_series_collection(self, lf: pl.LazyFrame) -> TimeSeriesCollection:
+    def to_time_series_collection(self, lf: pl.LazyFrame, target_column: str | None = None) -> TimeSeriesCollection:
         """
         Convert a LazyFrame to TimeSeriesCollection.
 
@@ -581,6 +584,9 @@ class CaravanDataSource:
 
         Args:
             lf: LazyFrame from get_timeseries()
+            target_column: Name of target column. If provided, will look for
+                          '{target_column}_was_filled' column and extract as
+                          binary flags for sequence filtering.
 
         Returns:
             TimeSeriesCollection with data loaded into memory
@@ -627,9 +633,21 @@ class CaravanDataSource:
                     "All feature columns must be numeric. This indicates an upstream processing error."
                 )
 
+        # Check for target filled flag column if target specified
+        target_filled_column = None
+        if target_column:
+            target_filled_column = f"{target_column}_was_filled"
+            if target_filled_column not in df.columns:
+                logger.warning(
+                    f"Target column '{target_column}' specified but '{target_filled_column}' column not found. "
+                    "Proceeding without target filled flags."
+                )
+                target_filled_column = None
+
         # Process each gauge
         tensors = []
         date_ranges = []
+        target_filled_tensors = [] if target_filled_column else None
 
         # Get unique gauge_ids and sort them for consistent ordering
         gauge_ids = sorted(df["gauge_id"].unique().to_list())
@@ -662,6 +680,13 @@ class CaravanDataSource:
             # Convert to torch tensor using Polars' to_torch method
             tensor = feature_data.to_torch(dtype=pl.Float32)
             tensors.append(tensor)
+            
+            # Extract target filled flag if available
+            if target_filled_column:
+                flag_data = gauge_df[target_filled_column]
+                # Convert to uint8 first, then to tensor
+                flag_tensor = flag_data.cast(pl.UInt8).to_torch().squeeze()
+                target_filled_tensors.append(flag_tensor)
 
             # Extract date range
             date_series = gauge_df["date"]
@@ -701,6 +726,7 @@ class CaravanDataSource:
             feature_names=feature_columns,
             date_ranges=date_ranges,
             group_identifiers=gauge_ids,
+            target_was_filled=target_filled_tensors,
             validate=True,  # Always validate to catch any remaining issues
         )
 

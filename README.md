@@ -1,3 +1,4 @@
 # To Dos
 
-Finish implementing contracts. I need to write the collate function but I might have done something wrong with the shape of y. Let's look at this closer
+1. I need to implement HP tuning (keep it simple)
+2. I need to make sure that zero filled streamflow values are NOT used by the evaluation framework. So I need the was_filled binary flag: should be straight forward

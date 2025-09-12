@@ -433,3 +433,129 @@ class TestTimeSeriesCollection:
         # Test group_to_idx mapping
         assert collection.group_to_idx["group1"] == 0
         assert collection.group_to_idx["group2"] == 1
+
+    def test_target_was_filled_basic(self, basic_data):
+        """Test construction with target_was_filled tensors."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Create binary flag tensors matching the timesteps for each group
+        target_filled = [
+            torch.tensor([0, 1, 0], dtype=torch.uint8),  # group1: 3 timesteps
+            torch.tensor([1, 0], dtype=torch.uint8),      # group2: 2 timesteps
+        ]
+        
+        collection = TimeSeriesCollection(
+            tensors, feature_names, date_ranges, group_identifiers,
+            target_was_filled=target_filled
+        )
+        
+        assert collection.target_was_filled is not None
+        assert len(collection.target_was_filled) == 2
+        assert torch.equal(collection.target_was_filled[0], target_filled[0])
+        assert torch.equal(collection.target_was_filled[1], target_filled[1])
+        
+    def test_target_was_filled_validation_mismatch_count(self, basic_data):
+        """Test validation fails when target_was_filled count doesn't match tensors."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Wrong number of flag tensors
+        target_filled = [
+            torch.tensor([0, 1, 0], dtype=torch.uint8),  # Only one tensor instead of two
+        ]
+        
+        with pytest.raises(ValueError, match="Number of target_was_filled tensors"):
+            TimeSeriesCollection(
+                tensors, feature_names, date_ranges, group_identifiers,
+                target_was_filled=target_filled
+            )
+    
+    def test_target_was_filled_validation_wrong_shape(self, basic_data):
+        """Test validation fails when target_was_filled has wrong shape."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # 2D tensor instead of 1D
+        target_filled = [
+            torch.tensor([[0, 1], [1, 0]], dtype=torch.uint8),  # 2D instead of 1D
+            torch.tensor([1, 0], dtype=torch.uint8),
+        ]
+        
+        with pytest.raises(ValueError, match="target_was_filled tensor must be 1D"):
+            TimeSeriesCollection(
+                tensors, feature_names, date_ranges, group_identifiers,
+                target_was_filled=target_filled
+            )
+            
+    def test_target_was_filled_validation_wrong_length(self, basic_data):
+        """Test validation fails when target_was_filled has wrong length."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Wrong length for first group
+        target_filled = [
+            torch.tensor([0, 1], dtype=torch.uint8),  # 2 instead of 3 timesteps
+            torch.tensor([1, 0], dtype=torch.uint8),
+        ]
+        
+        with pytest.raises(ValueError, match="target_was_filled length"):
+            TimeSeriesCollection(
+                tensors, feature_names, date_ranges, group_identifiers,
+                target_was_filled=target_filled
+            )
+            
+    def test_target_was_filled_validation_non_binary(self, basic_data):
+        """Test validation fails when target_was_filled has non-binary values."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Non-binary values
+        target_filled = [
+            torch.tensor([0, 2, 0], dtype=torch.uint8),  # Contains 2 instead of 0/1
+            torch.tensor([1, 0], dtype=torch.uint8),
+        ]
+        
+        with pytest.raises(ValueError, match="target_was_filled must contain only 0 or 1"):
+            TimeSeriesCollection(
+                tensors, feature_names, date_ranges, group_identifiers,
+                target_was_filled=target_filled
+            )
+            
+    def test_target_was_filled_in_summary(self, basic_data):
+        """Test that summary includes has_target_filled_flags."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Without flags
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
+        summary = collection.summary()
+        assert "has_target_filled_flags" in summary
+        assert summary["has_target_filled_flags"] is False
+        
+        # With flags
+        target_filled = [
+            torch.tensor([0, 1, 0], dtype=torch.uint8),
+            torch.tensor([1, 0], dtype=torch.uint8),
+        ]
+        collection = TimeSeriesCollection(
+            tensors, feature_names, date_ranges, group_identifiers,
+            target_was_filled=target_filled
+        )
+        summary = collection.summary()
+        assert summary["has_target_filled_flags"] is True
+        
+    def test_target_was_filled_in_repr(self, basic_data):
+        """Test that repr indicates presence of target filled flags."""
+        tensors, feature_names, date_ranges, group_identifiers = basic_data
+        
+        # Without flags
+        collection = TimeSeriesCollection(tensors, feature_names, date_ranges, group_identifiers)
+        repr_str = repr(collection)
+        assert "has_target_filled_flags" not in repr_str
+        
+        # With flags
+        target_filled = [
+            torch.tensor([0, 1, 0], dtype=torch.uint8),
+            torch.tensor([1, 0], dtype=torch.uint8),
+        ]
+        collection = TimeSeriesCollection(
+            tensors, feature_names, date_ranges, group_identifiers,
+            target_was_filled=target_filled
+        )
+        repr_str = repr(collection)
+        assert "has_target_filled_flags=True" in repr_str

@@ -835,3 +835,278 @@ class TestLSHDataModule:
         assert config_dict["future_features"] == []
         assert config_dict["include_dates"] is False
         assert config_dict["is_autoregressive"] is False
+
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
+    def test_target_filled_flag_pipeline(self, mock_caravan_class, tmp_path):
+        """Test that target filled flags are correctly passed through the pipeline."""
+        # Setup config with target
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 5},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        # Create data directories
+        (tmp_path / "train").mkdir()
+
+        # Setup mocks
+        mock_caravan = MagicMock()
+        mock_caravan_class.return_value = mock_caravan
+        mock_caravan.list_gauge_ids.return_value = ["gauge1", "gauge2"]
+
+        # Mock LazyFrames
+        mock_ts_lf = MagicMock()
+        mock_static_lf = MagicMock()
+        mock_caravan.get_timeseries.return_value = mock_ts_lf
+        mock_caravan.get_static_attributes.return_value = mock_static_lf
+
+        # Mock time series with target_was_filled flags
+        mock_time_series = MagicMock()
+        mock_time_series.feature_names = ["streamflow", "precipitation"]
+        mock_time_series.__len__.return_value = 2
+        mock_time_series.get_n_features.return_value = 2
+        mock_time_series.get_group_length_by_idx.side_effect = [30, 30]  # Both groups have 30 timesteps
+        
+        # Create mock filled flags - gauge1 has some filled, gauge2 has none
+        gauge1_flags = torch.zeros(30, dtype=torch.uint8)
+        gauge1_flags[15:20] = 1  # Mark positions 15-19 as filled
+        gauge2_flags = torch.zeros(30, dtype=torch.uint8)  # All original
+        
+        mock_time_series.target_was_filled = [gauge1_flags, gauge2_flags]
+
+        mock_static_attrs = MagicMock()
+        mock_static_attrs.__len__.return_value = 2  # Same number of groups as time series
+        mock_static_attrs.get_n_attributes.return_value = 1  # Number of static attributes (area)
+        mock_caravan.to_time_series_collection.return_value = mock_time_series
+        mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
+
+        # Initialize datamodule
+        dm = LSHDataModule(config_path)
+
+        # Test container building with proper sequence filtering
+        with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
+            # We expect the method to be called with target_was_filled
+            mock_find.return_value = torch.tensor([[0, 0, 15], [1, 0, 15], [1, 5, 20]])
+            
+            container = dm._build_container("train")
+            
+            # Verify find_valid_sequences was called with target_was_filled
+            mock_find.assert_called_once()
+            call_args = mock_find.call_args
+            assert call_args[1]["target_was_filled"] == mock_time_series.target_was_filled
+            assert call_args[1]["input_length"] == 10
+            assert call_args[1]["output_length"] == 5
+
+        # Verify to_time_series_collection was called with target column
+        mock_caravan.to_time_series_collection.assert_called_with(mock_ts_lf, target_column="streamflow")
+
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
+    def test_target_filled_flag_not_available(self, mock_caravan_class, tmp_path):
+        """Test that pipeline works when target filled flags are not available."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 5},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        (tmp_path / "train").mkdir()
+
+        # Setup mocks
+        mock_caravan = MagicMock()
+        mock_caravan_class.return_value = mock_caravan
+        mock_caravan.list_gauge_ids.return_value = ["gauge1"]
+
+        mock_ts_lf = MagicMock()
+        mock_static_lf = MagicMock()
+        mock_caravan.get_timeseries.return_value = mock_ts_lf
+        mock_caravan.get_static_attributes.return_value = mock_static_lf
+
+        # Mock time series WITHOUT target_was_filled
+        mock_time_series = MagicMock()
+        mock_time_series.feature_names = ["streamflow", "precipitation"]
+        mock_time_series.__len__.return_value = 1
+        mock_time_series.get_n_features.return_value = 2
+        mock_time_series.get_group_length_by_idx.return_value = 30
+        mock_time_series.target_was_filled = None  # No filled flags available
+
+        mock_static_attrs = MagicMock()
+        mock_static_attrs.__len__.return_value = 1  # Same number of groups as time series
+        mock_static_attrs.get_n_attributes.return_value = 1  # Number of static attributes (area)
+        mock_caravan.to_time_series_collection.return_value = mock_time_series
+        mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
+
+        dm = LSHDataModule(config_path)
+
+        with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
+            # Without flags, all sequences should be considered valid
+            mock_find.return_value = torch.tensor([[0, 0, 15], [0, 5, 20], [0, 10, 25]])
+            
+            container = dm._build_container("train")
+            
+            # Verify find_valid_sequences was called with None for target_was_filled
+            mock_find.assert_called_once()
+            call_args = mock_find.call_args
+            assert call_args[1]["target_was_filled"] is None
+
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")
+    def test_multiple_splits_with_filled_flags(self, mock_caravan_class, tmp_path):
+        """Test that filled flags are handled correctly across train/val/test splits."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 5, "output_length": 2},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 16},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        # Create all split directories
+        for split in ["train", "val", "test"]:
+            (tmp_path / split).mkdir()
+
+        # Setup mock caravan for each split
+        mock_caravan = MagicMock()
+        mock_caravan_class.return_value = mock_caravan
+        mock_caravan.list_gauge_ids.return_value = ["gauge1"]
+
+        mock_ts_lf = MagicMock()
+        mock_static_lf = MagicMock()
+        mock_caravan.get_timeseries.return_value = mock_ts_lf
+        mock_caravan.get_static_attributes.return_value = mock_static_lf
+
+        # Create different filled patterns for each split
+        def create_time_series_for_split(split_name):
+            mock_ts = MagicMock()
+            mock_ts.feature_names = ["streamflow", "precipitation"]
+            mock_ts.__len__.return_value = 1
+            mock_ts.get_n_features.return_value = 2
+            mock_ts.get_group_length_by_idx.return_value = 20
+            
+            # Different filled patterns per split
+            if split_name == "train":
+                flags = torch.zeros(20, dtype=torch.uint8)
+                flags[10:12] = 1  # Some filled in middle
+            elif split_name == "val":
+                flags = torch.zeros(20, dtype=torch.uint8)
+                flags[0:3] = 1  # Filled at start
+            else:  # test
+                flags = torch.ones(20, dtype=torch.uint8)  # All filled
+            
+            mock_ts.target_was_filled = [flags]
+            return mock_ts
+
+        mock_static_attrs = MagicMock()
+        mock_static_attrs.__len__.return_value = 1  # Same number of groups as time series
+        mock_static_attrs.get_n_attributes.return_value = 1  # Number of static attributes (area)
+        mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
+
+        # Setup different returns for each split
+        split_count = 0
+        split_names = ["train", "val", "test"]
+        
+        def get_split_time_series(*args, **kwargs):
+            nonlocal split_count
+            split_name = split_names[split_count % 3]
+            split_count += 1
+            return create_time_series_for_split(split_name)
+        
+        mock_caravan.to_time_series_collection.side_effect = get_split_time_series
+
+        dm = LSHDataModule(config_path)
+
+        # Setup all splits
+        with patch.object(SequenceIndex, "find_valid_sequences") as mock_find:
+            # Different number of valid sequences per split
+            mock_find.side_effect = [
+                torch.tensor([[0, 0, 7], [0, 13, 20]]),  # train: 2 valid sequences
+                torch.tensor([[0, 5, 12]]),  # val: 1 valid sequence
+                torch.empty((0, 3), dtype=torch.long),  # test: no valid sequences (all filled)
+            ]
+            
+            dm.setup(stage=None)  # Setup all stages
+            
+            # Verify find_valid_sequences was called 3 times with different flags
+            assert mock_find.call_count == 3
+            
+            # Check each call had the correct flags
+            for i, call in enumerate(mock_find.call_args_list):
+                assert "target_was_filled" in call[1]
+                if i < 2:  # train and val have some flags
+                    assert call[1]["target_was_filled"] is not None
+                    assert len(call[1]["target_was_filled"]) == 1
+                # For test split, all values are filled
+
+    @patch("transfer_learning_publication.data.lsh_datamodule.CaravanDataSource")  
+    def test_build_container_validates_feature_match(self, mock_caravan_class, tmp_path):
+        """Test that _build_container validates features match configuration."""
+        config = {
+            "data": {"base_path": str(tmp_path), "region": "test"},
+            "features": {
+                "forcing": ["streamflow", "precipitation", "temperature"],
+                "static": ["area"],
+                "target": "streamflow",
+            },
+            "sequence": {"input_length": 10, "output_length": 5},
+            "data_preparation": {"is_autoregressive": True},
+            "dataloader": {"batch_size": 32},
+        }
+
+        config_path = tmp_path / "config.yaml"
+        with open(config_path, "w") as f:
+            yaml.dump(config, f)
+
+        (tmp_path / "train").mkdir()
+
+        mock_caravan = MagicMock()
+        mock_caravan_class.return_value = mock_caravan
+        mock_caravan.list_gauge_ids.return_value = ["gauge1"]
+
+        mock_ts_lf = MagicMock()
+        mock_static_lf = MagicMock()
+        mock_caravan.get_timeseries.return_value = mock_ts_lf
+        mock_caravan.get_static_attributes.return_value = mock_static_lf
+
+        # Mock time series with WRONG feature names
+        mock_time_series = MagicMock()
+        mock_time_series.feature_names = ["streamflow", "humidity"]  # Wrong features!
+        mock_time_series.__len__.return_value = 1
+        mock_time_series.target_was_filled = None
+
+        mock_static_attrs = MagicMock()
+        mock_static_attrs.__len__.return_value = 1  # Same number of groups as time series
+        mock_static_attrs.get_n_attributes.return_value = 1  # Number of static attributes (area)
+        mock_caravan.to_time_series_collection.return_value = mock_time_series
+        mock_caravan.to_static_attribute_collection.return_value = mock_static_attrs
+
+        dm = LSHDataModule(config_path)
+
+        # Should raise error due to feature mismatch
+        with pytest.raises(ValueError, match="Feature mismatch"):
+            dm._build_container("train")

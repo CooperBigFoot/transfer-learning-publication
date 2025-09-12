@@ -307,6 +307,185 @@ class TestSequenceIndex:
         group2_sequences = sequences[sequences[:, 0] == 2]
         assert len(group2_sequences) == 0
 
+    def test_find_valid_sequences_with_target_filled_no_filled(self):
+        """Test find_valid_sequences with target_was_filled where no values are filled."""
+        # Create time series
+        tensor0 = torch.randn(10, 2, dtype=torch.float32)
+        tensor1 = torch.randn(8, 2, dtype=torch.float32)
+        
+        from datetime import datetime
+        
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0, tensor1],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[
+                (datetime(2020, 1, 1), datetime(2020, 1, 10)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 8)),
+            ],
+            group_identifiers=["group0", "group1"],
+        )
+        
+        # Create flag tensors with all zeros (no filled values)
+        target_filled = [
+            torch.zeros(10, dtype=torch.uint8),
+            torch.zeros(8, dtype=torch.uint8),
+        ]
+        
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+            target_was_filled=target_filled,
+        )
+        
+        # Should get the same sequences as without flags
+        # Group 0: length 10, total 5 -> 6 sequences
+        # Group 1: length 8, total 5 -> 4 sequences
+        assert sequences.shape[0] == 10
+        
+    def test_find_valid_sequences_with_target_filled_all_filled(self):
+        """Test find_valid_sequences with target_was_filled where all values are filled."""
+        # Create time series
+        tensor0 = torch.randn(10, 2, dtype=torch.float32)
+        tensor1 = torch.randn(8, 2, dtype=torch.float32)
+        
+        from datetime import datetime
+        
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0, tensor1],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[
+                (datetime(2020, 1, 1), datetime(2020, 1, 10)),
+                (datetime(2020, 1, 1), datetime(2020, 1, 8)),
+            ],
+            group_identifiers=["group0", "group1"],
+        )
+        
+        # Create flag tensors with all ones (all filled values)
+        target_filled = [
+            torch.ones(10, dtype=torch.uint8),
+            torch.ones(8, dtype=torch.uint8),
+        ]
+        
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+            target_was_filled=target_filled,
+        )
+        
+        # Should get no sequences since all target values are filled
+        assert sequences.shape[0] == 0
+        
+    def test_find_valid_sequences_with_target_filled_mixed(self):
+        """Test find_valid_sequences with mixed filled/original values."""
+        # Create time series
+        tensor0 = torch.randn(10, 2, dtype=torch.float32)
+        
+        from datetime import datetime
+        
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[(datetime(2020, 1, 1), datetime(2020, 1, 10))],
+            group_identifiers=["group0"],
+        )
+        
+        # Create flag with pattern: [0,0,0,0,0,1,1,0,0,0]
+        # This means positions 5 and 6 have filled values
+        target_filled = [
+            torch.tensor([0, 0, 0, 0, 0, 1, 1, 0, 0, 0], dtype=torch.uint8),
+        ]
+        
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+            target_was_filled=target_filled,
+        )
+        
+        # With input_length=3, output_length=2, total_length=5
+        # Possible windows: [0:5], [1:6], [2:7], [3:8], [4:9], [5:10]
+        # Output windows:   [3:5], [4:6], [5:7], [6:8], [7:9], [8:10]
+        # 
+        # [0:5] -> output [3:5] = positions 3,4 -> flags [0,0] -> VALID
+        # [1:6] -> output [4:6] = positions 4,5 -> flags [0,1] -> INVALID (has filled)
+        # [2:7] -> output [5:7] = positions 5,6 -> flags [1,1] -> INVALID (has filled)
+        # [3:8] -> output [6:8] = positions 6,7 -> flags [1,0] -> INVALID (has filled)
+        # [4:9] -> output [7:9] = positions 7,8 -> flags [0,0] -> VALID
+        # [5:10] -> output [8:10] = positions 8,9 -> flags [0,0] -> VALID
+        
+        assert sequences.shape[0] == 3  # Only 3 valid sequences
+        
+        # Check the valid sequences
+        valid_starts = sequences[:, 1].tolist()
+        assert 0 in valid_starts  # [0:5] is valid
+        assert 4 in valid_starts  # [4:9] is valid
+        assert 5 in valid_starts  # [5:10] is valid
+        
+    def test_find_valid_sequences_with_target_filled_output_window_only(self):
+        """Test that filled values in input window don't affect sequence validity."""
+        # Create time series
+        tensor0 = torch.randn(10, 2, dtype=torch.float32)
+        
+        from datetime import datetime
+        
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[(datetime(2020, 1, 1), datetime(2020, 1, 10))],
+            group_identifiers=["group0"],
+        )
+        
+        # Create flag with filled values only in positions that would be in input windows
+        # Pattern: [1,1,1,0,0,0,0,0,0,0]
+        # Filled values at positions 0,1,2 (will be in input windows only)
+        target_filled = [
+            torch.tensor([1, 1, 1, 0, 0, 0, 0, 0, 0, 0], dtype=torch.uint8),
+        ]
+        
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+            target_was_filled=target_filled,
+        )
+        
+        # With input_length=3, output_length=2:
+        # [0:5] -> input [0:3] = [1,1,1], output [3:5] = [0,0] -> VALID (output has no filled)
+        # [1:6] -> input [1:4] = [1,1,0], output [4:6] = [0,0] -> VALID
+        # [2:7] -> input [2:5] = [1,0,0], output [5:7] = [0,0] -> VALID
+        # [3:8] -> input [3:6] = [0,0,0], output [6:8] = [0,0] -> VALID
+        # [4:9] -> input [4:7] = [0,0,0], output [7:9] = [0,0] -> VALID
+        # [5:10] -> input [5:8] = [0,0,0], output [8:10] = [0,0] -> VALID
+        
+        # All sequences should be valid since filled values are only in input windows
+        assert sequences.shape[0] == 6
+        
+    def test_find_valid_sequences_backward_compatibility(self):
+        """Test that find_valid_sequences works without target_was_filled (backward compatibility)."""
+        # Create time series
+        tensor0 = torch.randn(10, 2, dtype=torch.float32)
+        
+        from datetime import datetime
+        
+        time_series = TimeSeriesCollection(
+            tensors=[tensor0],
+            feature_names=["feature1", "feature2"],
+            date_ranges=[(datetime(2020, 1, 1), datetime(2020, 1, 10))],
+            group_identifiers=["group0"],
+        )
+        
+        # Call without target_was_filled
+        sequences = SequenceIndex.find_valid_sequences(
+            time_series=time_series,
+            input_length=3,
+            output_length=2,
+        )
+        
+        # Should get all possible sequences
+        assert sequences.shape[0] == 6  # 10 - 5 + 1 = 6 sequences
+
     def test_find_valid_sequences_empty(self):
         """Test find_valid_sequences with empty time series."""
 

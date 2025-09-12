@@ -29,6 +29,7 @@ class TimeSeriesCollection:
         feature_names: list[str],  # Ordered list of feature names
         date_ranges: list[tuple[datetime, datetime]],  # List of (start, end) tuples
         group_identifiers: list[str],  # Ordered list of group identifiers
+        target_was_filled: list[torch.Tensor] | None = None,  # Optional target filled flags
         validate: bool = True,
     ):
         """
@@ -38,6 +39,9 @@ class TimeSeriesCollection:
             feature_names: Ordered list of feature names corresponding to tensor columns
             date_ranges: List of (start_date, end_date) tuples (same order as tensors)
             group_identifiers: Ordered list of group identifiers (same order as tensors)
+            target_was_filled: Optional list of 1D binary tensors (one per group).
+                              Each tensor has shape (n_timesteps,) with values:
+                              0 = original data, 1 = filled/imputed data
             validate: If True, validate data integrity (no NaNs, consistent shapes, etc.)
 
         Raises:
@@ -47,6 +51,7 @@ class TimeSeriesCollection:
         self._feature_names = list(feature_names)  # Copy to ensure immutability
         self._date_ranges = list(date_ranges)  # Copy to ensure immutability
         self._group_identifiers = list(group_identifiers)  # Copy to ensure immutability
+        self._target_was_filled = target_was_filled  # Store target filled flags
 
         # Validate input consistency
         if len(self._tensors) != len(self._group_identifiers):
@@ -58,6 +63,14 @@ class TimeSeriesCollection:
             raise ValueError(
                 f"Number of tensors ({len(self._tensors)}) must match number of date ranges ({len(self._date_ranges)})"
             )
+        
+        # Validate target_was_filled if provided
+        if self._target_was_filled is not None:
+            if len(self._target_was_filled) != len(self._tensors):
+                raise ValueError(
+                    f"Number of target_was_filled tensors ({len(self._target_was_filled)}) must match "
+                    f"number of tensors ({len(self._tensors)})"
+                )
 
         # Build index mappings
         self._group_to_idx = {group: idx for idx, group in enumerate(self._group_identifiers)}
@@ -210,6 +223,11 @@ class TimeSeriesCollection:
         """Get date ranges for each group."""
         # Reconstruct as dictionary for compatibility
         return {self._group_identifiers[i]: self._date_ranges[i] for i in range(self._n_groups)}
+    
+    @property
+    def target_was_filled(self) -> list[torch.Tensor] | None:
+        """Get target filled flags if available."""
+        return self._target_was_filled
 
     def get_group_length_by_idx(self, group_idx: int) -> int:
         """
@@ -365,6 +383,30 @@ class TimeSeriesCollection:
                     f"Group '{group_id}' has {tensor.shape[0]} timesteps but date range "
                     f"[{start_date}, {end_date}] implies {expected_days} days"
                 )
+            
+            # Check target_was_filled consistency if provided
+            if self._target_was_filled is not None:
+                flag_tensor = self._target_was_filled[idx]
+                
+                # Check shape - should be 1D with same length as timesteps
+                if flag_tensor.dim() != 1:
+                    raise ValueError(
+                        f"Group '{group_id}' target_was_filled tensor must be 1D, got {flag_tensor.dim()}D"
+                    )
+                
+                if flag_tensor.shape[0] != tensor.shape[0]:
+                    raise ValueError(
+                        f"Group '{group_id}' target_was_filled length ({flag_tensor.shape[0]}) must match "
+                        f"number of timesteps ({tensor.shape[0]})"
+                    )
+                
+                # Check values are binary (0 or 1)
+                unique_vals = torch.unique(flag_tensor)
+                if not torch.all((unique_vals == 0) | (unique_vals == 1)):
+                    raise ValueError(
+                        f"Group '{group_id}' target_was_filled must contain only 0 or 1, "
+                        f"found values: {unique_vals.tolist()}"
+                    )
 
         logger.info(f"Validation passed for {self._n_groups} groups")
 
@@ -414,6 +456,7 @@ class TimeSeriesCollection:
             "avg_length": sum(lengths) / len(lengths),
             "memory_mb": round(memory_mb, 2),
             "date_range": (min(all_start_dates), max(all_end_dates)),
+            "has_target_filled_flags": self._target_was_filled is not None,
         }
 
     def __repr__(self) -> str:
@@ -424,7 +467,8 @@ class TimeSeriesCollection:
             f"n_groups={stats['n_groups']}, "
             f"n_features={stats['n_features']}, "
             f"total_timesteps={stats['total_timesteps']:,}, "
-            f"memory_mb={stats['memory_mb']:.1f})"
+            f"memory_mb={stats['memory_mb']:.1f}"
+            f"{', has_target_filled_flags=True' if self._target_was_filled is not None else ''})"
         )
 
     def __len__(self) -> int:

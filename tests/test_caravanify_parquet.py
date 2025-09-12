@@ -1704,6 +1704,120 @@ class TestToTimeSeriesCollection:
         for i, feature in enumerate(expected_features):
             assert collection.feature_indices[feature] == i
 
+    def test_to_time_series_collection_with_target_filled_flag(self, tmp_path):
+        """Test extraction of target_was_filled column when target is specified."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+        
+        # Create test data with was_filled flag
+        df = pl.DataFrame({
+            "gauge_id": ["G001", "G001", "G002", "G002"],
+            "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02"],
+            "streamflow": [10.5, 0.0, 15.2, 14.8],
+            "temperature": [5.0, 6.2, 4.8, 5.5],
+            "streamflow_was_filled": [0, 1, 0, 0],  # Second value of G001 was filled
+        })
+        
+        # Write the data
+        ds.write_timeseries(df, tmp_path)
+        
+        # Read back and convert with target specified
+        lf = ds.get_timeseries()
+        collection = ds.to_time_series_collection(lf, target_column="streamflow")
+        
+        # Check that target_was_filled was extracted
+        assert collection.target_was_filled is not None
+        assert len(collection.target_was_filled) == 2  # Two gauges
+        
+        # Check the flag values for G001
+        import torch
+        assert torch.equal(collection.target_was_filled[0], torch.tensor([0, 1], dtype=torch.uint8))
+        # Check the flag values for G002
+        assert torch.equal(collection.target_was_filled[1], torch.tensor([0, 0], dtype=torch.uint8))
+        
+    def test_to_time_series_collection_without_target_filled_flag(self, tmp_path):
+        """Test that missing was_filled column doesn't cause errors when target specified."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+        
+        # Create test data WITHOUT was_filled flag
+        df = pl.DataFrame({
+            "gauge_id": ["G001", "G001", "G002", "G002"],
+            "date": ["2020-01-01", "2020-01-02", "2020-01-01", "2020-01-02"],
+            "streamflow": [10.5, 12.0, 15.2, 14.8],
+            "temperature": [5.0, 6.2, 4.8, 5.5],
+        })
+        
+        # Write the data
+        ds.write_timeseries(df, tmp_path)
+        
+        # Read back and convert with target specified (but no flag column exists)
+        lf = ds.get_timeseries()
+        
+        # Should log warning but not fail - just convert normally
+        collection = ds.to_time_series_collection(lf, target_column="streamflow")
+        
+        # Check that target_was_filled is None when flag column not available
+        assert collection.target_was_filled is None
+        
+    def test_to_time_series_collection_no_target_specified(self, temp_hive_data):
+        """Test that no target_was_filled is extracted when target not specified."""
+        ds = CaravanDataSource(temp_hive_data)
+        
+        lf = ds.get_timeseries(gauge_ids=["G01013500"])
+        
+        # Convert without specifying target
+        collection = ds.to_time_series_collection(lf)
+        
+        # Should have no target_was_filled
+        assert collection.target_was_filled is None
+        
+    def test_to_time_series_collection_with_mixed_filled_values(self, tmp_path):
+        """Test with complex pattern of filled values across multiple gauges."""
+        ds = CaravanDataSource(tmp_path, region="test_region")
+        
+        # Create test data with varying patterns of filled values
+        df = pl.DataFrame({
+            "gauge_id": ["G001"] * 5 + ["G002"] * 5 + ["G003"] * 5,
+            "date": (["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04", "2020-01-05"] * 3),
+            "streamflow": [
+                10.5, 0.0, 0.0, 14.1, 15.2,  # G001: indices 1,2 filled
+                20.1, 21.3, 22.4, 0.0, 24.8,  # G002: index 3 filled
+                0.0, 0.0, 0.0, 0.0, 0.0,      # G003: all filled
+            ],
+            "streamflow_was_filled": [
+                0, 1, 1, 0, 0,  # G001
+                0, 0, 0, 1, 0,  # G002
+                1, 1, 1, 1, 1,  # G003
+            ],
+        })
+        
+        # Write the data
+        ds.write_timeseries(df, tmp_path)
+        
+        # Read back and convert with target specified
+        lf = ds.get_timeseries()
+        collection = ds.to_time_series_collection(lf, target_column="streamflow")
+        
+        # Check that target_was_filled was extracted correctly
+        assert collection.target_was_filled is not None
+        assert len(collection.target_was_filled) == 3
+        
+        import torch
+        # G001: [0, 1, 1, 0, 0]
+        assert torch.equal(
+            collection.target_was_filled[0], 
+            torch.tensor([0, 1, 1, 0, 0], dtype=torch.uint8)
+        )
+        # G002: [0, 0, 0, 1, 0]
+        assert torch.equal(
+            collection.target_was_filled[1],
+            torch.tensor([0, 0, 0, 1, 0], dtype=torch.uint8)
+        )
+        # G003: [1, 1, 1, 1, 1]
+        assert torch.equal(
+            collection.target_was_filled[2],
+            torch.tensor([1, 1, 1, 1, 1], dtype=torch.uint8)
+        )
+
 
 class TestToStaticAttributeCollection:
     """Test to_static_attribute_collection method."""
